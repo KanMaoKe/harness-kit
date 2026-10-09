@@ -22,3 +22,7 @@ git diff --check
 - 不提交个人记忆、宿主设置、日志或凭据。
 
 Python 使用四空格缩进；文本采用 UTF-8 和 LF。保持命令行输入、输出及退出码可预测，复用 `kit/core.py` 中的路径与配置逻辑。
+
+## 贡献许可
+
+提交贡献时，请确保有权提供相应内容，并同意该贡献按仓库的 MIT + Commons Clause v1.0 许可发布。参见 [LICENSE](LICENSE)。
