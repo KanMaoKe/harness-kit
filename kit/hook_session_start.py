@@ -112,4 +112,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(core.run_cli(main, hook=True))

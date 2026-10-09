@@ -26,6 +26,7 @@ else:
     from . import core
 
 REQUIRED = [
+    ('STATE.json', '当前任务状态'),
     ('PROJECT.md', '项目宪法'),
     ('TASKS.md', '任务规则'),
     ('memory/MEMORY.md', '长期记忆'),
@@ -70,7 +71,7 @@ def check(path):
     # 1) 缺件
     missing = []
     for rel, label in REQUIRED:
-        if not os.path.exists(os.path.join(wb, rel.replace('/', os.sep))):
+        if not os.path.isfile(os.path.join(wb, rel.replace('/', os.sep))):
             missing.append(rel)
     if not os.path.exists(os.path.join(wb, core.HARNESS_MARK)):
         result['warnings'].append(
@@ -80,6 +81,19 @@ def check(path):
     if missing:
         result['issues'].append('缺件：%s' % '、'.join(missing))
         result['score'] -= min(30, 10 * len(missing))
+
+    result['structure_complete'] = not missing and os.path.isfile(os.path.join(wb, core.HARNESS_MARK))
+    if os.path.isfile(os.path.join(wb, 'STATE.json')):
+        try:
+            state = core.task_state(path)
+            result['task_status'] = state['status']
+            if not state['goal'].strip():
+                result['notes'].append('STATE.json 尚未填写当前目标')
+            if state['status'] == 'completed' and (not state['acceptance'] or not state['verification']):
+                result['warnings'].append('任务标记完成，但缺少验收条件或验证记录')
+        except core.DataError as error:
+            result['issues'].append(str(error))
+            result['score'] -= 10
 
     # 2) 待补栏目
     proj = os.path.join(wb, 'PROJECT.md')
@@ -144,7 +158,7 @@ def check(path):
     sk = os.path.join(wb, 'skills')
     if os.path.isdir(sk):
         n = len([d for d in os.listdir(sk)
-                 if os.path.isdir(os.path.join(sk, d))])
+                 if os.path.isfile(os.path.join(sk, d, 'SKILL.md'))])
         result['skill_count'] = n
         if n == 0:
             result['notes'].append('还没有沉淀任何技能——等到某个流程被重复用到第三次，就值得写一个')
@@ -174,12 +188,13 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description='harness 体检')
     ap.add_argument('--path', required=True)
     ap.add_argument('--json', action='store_true', help='输出 JSON')
+    ap.add_argument('--strict', action='store_true', help='发现结构问题或警告时返回退出码 1')
     args = ap.parse_args(argv)
 
     r = check(args.path)
     if args.json:
         core.emit_json(r)
-        return 0
+        return 1 if args.strict and (r['issues'] or r['warnings']) else 0
 
     lines = ['体检对象：%s' % r['path'], '状态：%s ｜ 健康分：%d/100' % (r['state'], r['score']), '']
     if r['issues']:
@@ -196,8 +211,8 @@ def main(argv=None):
     if not (r['issues'] or r['warnings']):
         lines.append('没有发现需要处理的问题。')
     core.plain('\n'.join(lines))
-    return 0
+    return 1 if args.strict and (r['issues'] or r['warnings']) else 0
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(core.run_cli(main))

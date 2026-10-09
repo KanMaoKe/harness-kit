@@ -67,6 +67,7 @@ def main(argv=None):
                 return result.returncode
         print('已移除指定或记录的 hook。代码、技能、配置和项目内容均保留，可按需手动清理。')
         return 0
+    core.get_config()
     code_dir = HERE if args.in_place else Path(args.to or (Path(core.runtime_home()) / 'code')).expanduser().resolve()
     try:
         copy_code(code_dir)
@@ -98,4 +99,4 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(core.run_cli(main))

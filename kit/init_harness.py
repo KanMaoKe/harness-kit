@@ -40,6 +40,7 @@ def main(argv=None):
     ap.add_argument('--type', default='', help='unity / python / web / generic（默认自动检测）')
     ap.add_argument('--name', default='', help='项目名（默认取目录名）')
     ap.add_argument('--force', action='store_true', help='明确允许覆盖 PROJECT.md（记忆及其他已有正文仍保留）')
+    ap.add_argument('--agents-md', action='store_true', help='创建或更新根目录 AGENTS.md 的托管片段，保留其他内容')
     args = ap.parse_args(argv)
 
     root = os.path.normpath(os.path.abspath(args.path))
@@ -51,6 +52,8 @@ def main(argv=None):
     ptype = args.type or core.harness_meta(root).get('type') or detected or 'generic'
     name = args.name or core.harness_meta(root).get('project') or os.path.basename(root.rstrip('\\/')) or 'project'
     cfg = core.get_config()
+    if args.agents_md:
+        core.plan_agents(root, dry_run=True)
     today = time.strftime('%Y-%m-%d')
 
     uv = meta.get('unity_version') or core.unity_version(root)
@@ -99,6 +102,9 @@ def main(argv=None):
             os.path.join(wb, 'PROJECT.md'), overwrite=args.force)
     put_tpl(('common', 'TASKS.md.tpl'), os.path.join(wb, 'TASKS.md'), overwrite=False)
 
+    put_tpl(('common', 'STATE.json.tpl'), os.path.join(wb, 'STATE.json'), overwrite=False)
+    put(os.path.join(wb, 'AGENTS.snippet.md'), core.agents_content(root), overwrite=False)
+
     # 记忆层：已有的绝不覆盖
     put_tpl(('common', 'MEMORY.md.tpl'), os.path.join(wb, 'memory', 'MEMORY.md'), overwrite=False)
     put_tpl(('common', 'NARRATIVE.md.tpl'), os.path.join(wb, 'memory', 'NARRATIVE.md'), overwrite=False)
@@ -135,7 +141,9 @@ def main(argv=None):
             gi_hint = ('建议在 .gitignore 加一行 `%s/memory/`' % os.path.basename(wb) +
                        '（日志是私人的，PROJECT.md / TASKS.md / skills 建议入库）')
 
+    entry = core.plan_agents(root) if args.agents_md else None
     core.emit_json({
+        'agents_md': entry,
         'ok': True,
         'path': root,
         'harness_dir': wb,
@@ -150,4 +158,4 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(core.run_cli(main))

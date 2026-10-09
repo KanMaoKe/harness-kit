@@ -11,7 +11,7 @@ python -m unittest discover -s tests -v
 git diff --check
 ```
 
-测试在隔离目录中执行，不应修改个人宿主配置或连接外部服务。跨平台支持目前需要更多实际验证；不要将单平台通过描述成全平台验证。
+测试在隔离目录中执行，不应修改个人宿主配置或连接外部服务。CI 矩阵覆盖 Windows、Linux、macOS 和 Python 3.8 / 3.12 / 3.14；实际结果以 Actions 为准，不将单平台通过描述成全平台验证。
 
 ## 提交改动
 

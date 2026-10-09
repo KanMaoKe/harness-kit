@@ -10,7 +10,7 @@ import sys
 
 # ---- 路径解析 ----------------------------------------------------------------
 
-KIT_VERSION = '2.1'
+KIT_VERSION = '2.2'
 
 # 代码与模板所在目录（本文件在 <root>/kit/ 下）
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -55,12 +55,36 @@ def muted_path():
 HARNESS_MARK = 'HARNESS.json'
 
 
+class DataError(ValueError):
+    """Invalid persisted data, reported without a Python traceback by CLI tools."""
+
+
 def read_json(path, default=None):
     try:
-        with open(path, encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
+        with open(path, encoding='utf-8-sig') as stream:
+            value = json.load(stream)
+    except FileNotFoundError:
         return default if default is not None else {}
+    except (OSError, ValueError) as error:
+        raise DataError('%s: 无法读取 JSON，请修复文件后重试（%s）' % (path, error)) from error
+    if not isinstance(value, dict):
+        raise DataError('%s: JSON 顶层必须是对象' % path)
+    return value
+
+
+def run_cli(main, hook=False):
+    try:
+        return main() or 0
+    except (DataError, OSError) as error:
+        if hook:
+            try:
+                sys.stderr.reconfigure(encoding='utf-8')
+            except AttributeError:
+                pass
+            sys.stderr.write('[harness-kit] %s\n' % error)
+        else:
+            emit_json({'ok': False, 'error': str(error)})
+        return 2
 
 
 def write_json(path, data):
@@ -83,11 +107,20 @@ DEFAULT_CONFIG = {
 def get_config():
     cfg = dict(DEFAULT_CONFIG)
     cfg.update(read_json(config_path(), {}))
+    for name in ('enabled', 'once_per_session'):
+        if type(cfg[name]) is not bool:
+            raise DataError('%s: %s 必须是布尔值' % (config_path(), name))
+    if cfg['notify_scope'] not in ('always', 'project-only'):
+        raise DataError('%s: notify_scope 必须是 always 或 project-only' % config_path())
+    for name in ('checkpoint_interval', 'memory_max_chars'):
+        if type(cfg[name]) is not int or cfg[name] <= 0:
+            raise DataError('%s: %s 必须是正整数' % (config_path(), name))
     return cfg
 
 
 def ensure_config():
     """首次运行时落一份默认配置"""
+    get_config()  # Validate existing data before installation writes anything.
     p = config_path()
     if not os.path.exists(p):
         write_json(p, dict(DEFAULT_CONFIG))
@@ -262,3 +295,66 @@ def fill(template_text, vars_):
 def read_text(path):
     with open(path, encoding='utf-8') as f:
         return f.read()
+
+
+STATE_STATUSES = ('not_started', 'in_progress', 'blocked', 'completed')
+
+
+def task_state(path):
+    filename = os.path.join(project_dir(path), 'STATE.json')
+    if not os.path.isfile(filename):
+        raise DataError('%s: 缺少任务状态，请运行 sync 补齐' % filename)
+    value = read_json(filename)
+    if value.get('status') not in STATE_STATUSES:
+        raise DataError('%s: status 必须是 %s' % (filename, ', '.join(STATE_STATUSES)))
+    for name in ('goal', 'next_step', 'updated'):
+        if not isinstance(value.get(name), str):
+            raise DataError('%s: %s 必须是字符串' % (filename, name))
+    for name in ('acceptance', 'verification', 'blockers'):
+        if not isinstance(value.get(name), list) or not all(isinstance(item, str) for item in value[name]):
+            raise DataError('%s: %s 必须是字符串数组' % (filename, name))
+    return value
+
+
+AGENTS_START = '<!-- harness-kit:start -->'
+AGENTS_END = '<!-- harness-kit:end -->'
+
+
+def agents_content(path, existing=''):
+    folder = os.path.basename(project_dir(path))
+    block = ('%s\n## Harness 项目协作\n\n'
+             '- 先读取 `%s/PROJECT.md` 和 `%s/TASKS.md`，遵守已有项目指令。\n'
+             '- 从 `%s/STATE.json` 恢复当前目标、下一步、阻塞与验收状态。\n'
+             '- 只按任务需要读取相关记忆及技能，不一次性加载完整历史。\n'
+             '- 阶段结束时更新 STATE.json 中的验证结果和下一步；未验证不标记完成。\n'
+             '%s\n' % (AGENTS_START, folder, folder, folder, AGENTS_END))
+    if AGENTS_START not in existing and AGENTS_END not in existing:
+        return existing + ('\n\n' if existing and not existing.endswith('\n\n') else '') + block
+    if existing.count(AGENTS_START) != 1 or existing.count(AGENTS_END) != 1:
+        raise DataError('%s: harness-kit 入口标记不完整或重复，请手动修复 AGENTS.md' % path)
+    start, end = existing.index(AGENTS_START), existing.index(AGENTS_END)
+    if start > end:
+        raise DataError('%s: AGENTS.md 入口标记顺序错误' % path)
+    return existing[:start] + block.rstrip('\n') + existing[end + len(AGENTS_END):]
+
+
+def integrate_agents(path, dry_run=False):
+    filename = os.path.join(path, 'AGENTS.md')
+    with open(filename, 'r', encoding='utf-8', newline='') as stream:
+        existing = stream.read()
+    content = agents_content(path, existing)
+    if content != existing and not dry_run:
+        with open(filename, 'w', encoding='utf-8', newline='') as stream:
+            stream.write(content)
+    return {'path': filename, 'changed': content != existing, 'dry_run': dry_run}
+
+
+def plan_agents(path, dry_run=False):
+    filename = os.path.join(path, 'AGENTS.md')
+    if os.path.exists(filename):
+        return integrate_agents(path, dry_run)
+    content = agents_content(path)
+    if not dry_run:
+        with open(filename, 'x', encoding='utf-8') as stream:
+            stream.write(content)
+    return {'path': filename, 'changed': True, 'dry_run': dry_run}

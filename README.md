@@ -4,8 +4,6 @@
 
 **Python 3.8+ · 仅使用标准库 · Unity / Python / Web / 通用模板**
 
-> 设计参考了 B 站 UP 主 **千水_Asteroid** 的视频 [《【Agent】为什么游戏设计师需要搭建自己的 harness？》](https://www.bilibili.com/video/BV16Xbm6VEzd/)。本项目将其中的记忆分层、任务上下文与技能原子等思路整理为通用项目脚手架，并自行实现工具代码；这是个人实践项目，与 UP 主及其 Nebula 项目无隶属关系，也不代表其认可。感谢原作者的分享。
-
 ## 能做什么
 
 | 功能 | 行为 |
@@ -23,11 +21,11 @@
 ```bash
 git clone https://github.com/KanMaoKe/harness-kit.git
 cd harness-kit
-python kit/init_harness.py --path "../my-project"
+python kit/init_harness.py --path "../my-project" --agents-md
 python kit/doctor.py --path "../my-project"
 ```
 
-目标项目目录需要已存在。命令行直接可用，无需安装、API Key 或宿主配置。
+目标项目目录需要已存在。命令行直接可用，无需安装、API Key 或宿主配置。`--agents-md` 是可选入口接入，不希望修改项目根目录时省略即可。
 
 ```bash
 python kit/init_harness.py --path "../my-project" --type generic --name "My Project"
@@ -41,6 +39,8 @@ python kit/init_harness.py --path "../my-project" --type generic --name "My Proj
 <项目>/.harness/
 ├── PROJECT.md             项目定位、架构、开发约定与禁止事项
 ├── TASKS.md               任务类型、上下文选择与工具使用规则
+├── STATE.json             当前目标、验收、验证、阻塞及下一步
+├── AGENTS.snippet.md      可供手动合并的项目入口片段
 ├── memory/
 │   ├── MEMORY.md          稳定事实与长期决策
 │   ├── NARRATIVE.md       重要转折与决策来路
@@ -51,12 +51,53 @@ python kit/init_harness.py --path "../my-project" --type generic --name "My Proj
 └── HARNESS.json           工具版本、项目类型等元数据
 ```
 
-初始化后补全 `PROJECT.md`，调整 `TASKS.md`，让 AI 根据任务读取相关文件。生成文件不保证任何宿主自动加载，需要通过项目指令、技能或手动提示接入。例如：
+初始化后补全 `PROJECT.md`，调整 `TASKS.md`，在 `STATE.json` 中记录当前任务。稳定规则留在项目约定，阶段状态只更新任务摘要，重要决策按需写入记忆。
+
+### 标准入口
+
+每个项目都会生成 `AGENTS.snippet.md`，可手动合并到客户端支持的项目指令中。指定 `--agents-md` 时，工具会创建项目根目录的 `AGENTS.md`，或在已有文件中维护以下标记之间的片段，保留片段外原有内容：
 
 ```text
-请先读取 .harness/PROJECT.md 和 .harness/TASKS.md，
-根据当前任务选择相关记忆与技能。完成后记录关键决策、验证结果和未完成事项。
+<!-- harness-kit:start -->
+项目规则、任务规则和任务状态的读取入口
+<!-- harness-kit:end -->
 ```
+
+重复执行不会重复追加；不完整、重复或顺序错误的标记会报错，要求手动修复，不擅自替换原文件。该选项不会改变客户端本身的配置，不同客户端对 `AGENTS.md` 的发现方式仍需实际验证。
+
+已有项目可先预览，再接入：
+
+```bash
+python kit/sync.py --path "../my-project" --agents-md --dry-run
+python kit/sync.py --path "../my-project" --agents-md
+```
+
+### 恢复当前任务
+
+```bash
+python kit/resume.py --path "../my-project"
+python kit/resume.py --path "../my-project" --json
+```
+
+`resume` 只读取状态并指出优先读取的项目文件，不调用模型或自动执行下一步。旧项目先运行 `sync` 补齐状态文件；已有状态正文不会覆盖。
+
+`STATE.json` 使用以下结构（示例）：
+
+```json
+{
+  "goal": "实现配置校验",
+  "status": "in_progress",
+  "acceptance": ["非法配置返回明确错误，且不修改项目文件"],
+  "verification": ["基线测试通过；新增行为尚待验证"],
+  "blockers": [],
+  "next_step": "补充非法配置的回归测试",
+  "updated": "2026-10-09"
+}
+```
+
+`status` 可取 `not_started`、`in_progress`、`blocked`、`completed`。`goal`、`next_step`、`updated` 为字符串，其余三个字段为字符串数组。用户或 AI 在阶段结束时更新；任务完成需有验收与验证记录，缺失时恢复摘要和体检会提示。数组中的验证文字仍需真实证据支撑，工具不会替你执行或证明验证。
+
+任务摘要可能包含私人信息，可按需要额外忽略 `.harness/STATE.json`。
 
 手动在项目 `.gitignore` 中加入：
 
@@ -124,6 +165,7 @@ python install.py --uninstall
 | 命令 | 用途 |
 |---|---|
 | `python kit/init_harness.py --path "<项目>"` | 初始化或补齐 |
+| `python kit/resume.py --path "<项目>" --json` | 读取任务恢复摘要；省略 `--json` 输出可读报告 |
 | `python kit/doctor.py --path "<项目>" --json` | 体检 JSON；省略 `--json` 输出可读报告 |
 | `python kit/status.py --root "<父目录>" --depth 1` | 总览直接子项目，可加 `--json` |
 | `python kit/sync.py --path "<项目>" --dry-run` | 预览补齐；省略 `--dry-run` 执行 |
@@ -132,7 +174,9 @@ python install.py --uninstall
 | `python kit/mute.py --list` | 查看静音名单 |
 | `python kit/install_hook.py --settings "<settings.json>"` | 注册 hook；加 `--remove` 移除 |
 
-`init_harness` 和 `sync` 输出 JSON。`doctor` 发现问题也返回退出码 0，自动化时需解析 `issues`、`warnings` 和 `score`。
+`init_harness` 和 `sync` 输出 JSON。配置损坏、JSON 顶层类型错误、配置字段非法或文件读写失败时，命令行输出 `ok: false` 与错误位置，退出码为 2；hook 则在 stderr 报错，stdout 保持为空。不存在的配置使用默认值，现有损坏配置不会静默重置。
+
+`doctor` 默认保留报告模式，发现结构问题或警告仍返回 0；CI 可用 `--strict`，此时发现问题或警告返回 1。`structure_complete` 表示必需文件齐全，与仅表示已有初始化标记的 `state: full` 分开。`sync` 单个或批量目标失败时返回 1，数据读取异常返回 2。
 
 ## 配置
 
@@ -172,15 +216,15 @@ python install.py --uninstall
 python -m unittest discover -s tests -v
 ```
 
+CI 配置覆盖 Windows、Linux、macOS，以及 Python 3.8 / 3.12 / 3.14。实际结果以仓库 [Actions](https://github.com/KanMaoKe/harness-kit/actions) 为准，不代表已验证所有 AI 客户端。
+
 欢迎提交模板与宿主适配改进。模板变更请说明生成结果及对已有项目的影响。参见 [贡献指南](CONTRIBUTING.md) 与 [变更记录](CHANGELOG.md)。
 
 - [项目设计检查](docs/项目设计检查.md)：公开方案对照、当前限制与改进优先级。
 - [设计说明](docs/设计说明.md)：设计背景与文件分层。
-- [机制对照](docs/机制对照.md)：参考视频与模板设计的对应。“落地”包括文本规范，不代表全部运行时自动实现。
+- [能力与边界](docs/机制对照.md)：已实现的工具能力、模板约定与宿主职责。
 
-## 来源与许可
-
-原视频及其中的第三方内容归各自权利人所有；本仓库的许可不构成对原视频、字幕或其他第三方素材的再授权。
+## 许可
 
 本项目代码与自行编写的文档采用 [MIT + Commons Clause v1.0](LICENSE)，以公开源码的方式分享。
 

@@ -144,6 +144,104 @@ class HarnessRegressionTests(unittest.TestCase):
             {'matcher': 'startup', 'hooks': [other]},
             {'matcher': 'resume', 'hooks': [other]}])
 
+    def test_agents_opt_in_preserves_existing_and_is_idempotent(self):
+        agents = self.project / 'AGENTS.md'
+        original = '# Existing rules\r\n\r\nDo not change these.\r\n'
+        agents.write_bytes(original.encode('utf-8'))
+        self.init()
+        self.assertEqual(agents.read_bytes(), original.encode('utf-8'))
+        self.assertTrue((self.project / '.harness/AGENTS.snippet.md').is_file())
+        self.init('--agents-md')
+        first = agents.read_bytes()
+        self.assertTrue(first.startswith(original.encode('utf-8')))
+        self.assertIn(b'.harness/STATE.json', first)
+        self.init('--agents-md')
+        self.assertEqual(agents.read_bytes(), first)
+        self.assertEqual(first.count(b'<!-- harness-kit:start -->'), 1)
+
+    def test_agents_invalid_markers_do_not_initialize_project(self):
+        agents = self.project / 'AGENTS.md'
+        original = '<!-- harness-kit:start -->\nMy unfinished custom entry'
+        agents.write_text(original, encoding='utf-8')
+        result = json.loads(self.run_cli('kit/init_harness.py', '--path', self.project,
+                                         '--agents-md', expected=2))
+        self.assertFalse(result['ok'])
+        self.assertEqual(agents.read_text(), original)
+        self.assertFalse((self.project / '.harness').exists())
+
+    def test_sync_preview_and_state_preservation(self):
+        self.init()
+        harness = self.project / '.harness'
+        state = harness / 'STATE.json'
+        state.unlink()
+        self.run_cli('kit/sync.py', '--path', self.project, '--agents-md', '--dry-run')
+        self.assertFalse(state.exists())
+        self.assertFalse((self.project / 'AGENTS.md').exists())
+        self.run_cli('kit/sync.py', '--path', self.project, '--agents-md')
+        value = json.loads(state.read_text(encoding='utf-8'))
+        value.update(goal='Ship one feature', status='in_progress', acceptance=['Tests pass'],
+                     verification=['Baseline test passed'], next_step='Implement feature')
+        state.write_text(json.dumps(value), encoding='utf-8')
+        original = state.read_bytes()
+        self.init('--force')
+        self.run_cli('kit/sync.py', '--path', self.project)
+        self.assertEqual(state.read_bytes(), original)
+        resumed = json.loads(self.run_cli('kit/resume.py', '--path', self.project, '--json'))
+        self.assertEqual(resumed['state']['goal'], 'Ship one feature')
+        self.assertEqual(resumed['state']['next_step'], 'Implement feature')
+        self.assertEqual(resumed['warnings'], [])
+        self.assertEqual(len(resumed['read_first']), 3)
+
+    def test_config_failures_are_explicit_and_do_not_write_project(self):
+        state = self.work / 'state'
+        state.mkdir()
+        config = state / 'config.json'
+        for content in ['{broken', '[]', '{"enabled": "false"}',
+                        '{"notify_scope": "unknown"}', '{"checkpoint_interval": 0}',
+                        '{"memory_max_chars": true}']:
+            with self.subTest(content=content):
+                config.write_text(content, encoding='utf-8')
+                result = json.loads(self.run_cli('kit/init_harness.py', '--path', self.project, expected=2))
+                self.assertIn(str(config), result['error'])
+                self.assertFalse((self.project / '.harness').exists())
+                hook = subprocess.run([sys.executable, str(ROOT / 'kit/hook_session_start.py')],
+                                      input=json.dumps({'cwd': str(self.project)}), env=self.env,
+                                      capture_output=True, encoding='utf-8')
+                self.assertEqual(hook.returncode, 2)
+                self.assertEqual(hook.stdout, '')
+                self.assertNotIn('Traceback', hook.stderr)
+
+    def test_strict_doctor_and_invalid_task_state(self):
+        self.init()
+        harness = self.project / '.harness'
+        state = harness / 'STATE.json'
+        state.write_text('{"status": "invented"}', encoding='utf-8')
+        report = json.loads(self.run_cli('kit/doctor.py', '--path', self.project,
+                                        '--strict', '--json', expected=1))
+        self.assertTrue(report['issues'])
+        self.run_cli('kit/resume.py', '--path', self.project, '--json', expected=2)
+        state.unlink()
+        report = json.loads(self.run_cli('kit/doctor.py', '--path', self.project, '--json'))
+        self.assertFalse(report['structure_complete'])
+
+    def test_task_completed_without_evidence_warns(self):
+        self.init()
+        state = self.project / '.harness/STATE.json'
+        value = json.loads(state.read_text(encoding='utf-8'))
+        value.update(goal='A task', status='completed')
+        state.write_text(json.dumps(value), encoding='utf-8')
+        result = json.loads(self.run_cli('kit/resume.py', '--path', self.project, '--json'))
+        self.assertTrue(result['warnings'])
+
+    def test_legacy_agents_entry_points_to_actual_folder(self):
+        legacy = self.project / '.workbuddy'
+        legacy.mkdir()
+        (legacy / 'PROJECT.md').write_text('Legacy rules')
+        self.init('--agents-md')
+        agents = (self.project / 'AGENTS.md').read_text(encoding='utf-8')
+        self.assertIn('.workbuddy/STATE.json', agents)
+        self.assertNotIn('.harness/', agents)
+
     def test_hook_registration_requires_target(self):
         self.run_cli('kit/install_hook.py', expected=1)
         self.run_cli('install.py', '--in-place', '--with-hook', expected=2)

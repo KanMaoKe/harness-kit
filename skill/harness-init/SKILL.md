@@ -1,6 +1,6 @@
 ---
 name: harness-init
-description: 为项目初始化或补齐 harness 项目规则、任务上下文、记忆和技能结构；支持体检与项目总览。仅在用户要求初始化、补齐或检查时使用。
+description: 为项目初始化或补齐 harness 项目规则、任务上下文、记忆和技能结构；支持体检、任务恢复与项目总览。仅在用户要求初始化、补齐或检查时使用。
 ---
 
 # harness-init
@@ -19,7 +19,19 @@ python "{{KIT_PATH}}/kit/init_harness.py" --path "<项目>"
 
 默认补齐缺件，保留已有正文，重复执行也不会覆盖 `PROJECT.md`。只有用户明确要求重写项目约定时才使用 `--force`；它仍不会覆盖记忆、任务规则和技能正文。
 
+如用户要求接入标准项目入口，初始化或同步时添加 `--agents-md`，只维护根目录 `AGENTS.md` 中标记的片段。默认生成的 `AGENTS.snippet.md` 可供手动合并。
+
 初始化后，结合项目补全 `PROJECT.md`，提醒用户手动将相应 `<harness目录>/memory/` 加入 `.gitignore`。不要将整个记忆目录一次性注入上下文。
+
+## 恢复任务
+
+```bash
+python "{{KIT_PATH}}/kit/resume.py" --path "<项目>" --json
+```
+
+读取恢复摘要中的目标、下一步、验收、验证及阻塞，再按 `read_first` 读取项目文件。旧项目缺少状态时先用 `sync` 补齐；不要从空模板推断已完成。
+
+当前任务统一记录在 `STATE.json`，按阶段更新 `goal`、`status`、`acceptance`、`verification`、`blockers`、`next_step`、`updated`。验证未完成时如实记录，不标记 `completed`。
 
 ## 检查与维护
 
