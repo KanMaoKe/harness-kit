@@ -78,6 +78,33 @@ class HarnessRegressionTests(unittest.TestCase):
         self.init('--type', 'custom')
         self.assertTrue((self.project / '.harness/PROJECT.md').exists())
 
+    def test_full_and_compact_profiles_and_sync_preserve_choice(self):
+        result = self.init('--profile', 'compact')
+        harness = self.project / '.harness'
+        self.assertEqual(result['profile'], 'compact')
+        self.assertFalse((harness / 'memory').exists())
+        self.assertFalse((harness / 'skills').exists())
+        report = json.loads(self.run_cli('kit/doctor.py', '--path', self.project, '--json'))
+        self.assertTrue(report['structure_complete'])
+        self.init()
+        self.assertEqual(json.loads((harness / 'HARNESS.json').read_text())['profile'], 'compact')
+        self.run_cli('kit/sync.py', '--path', self.project)
+        self.assertFalse((harness / 'memory').exists())
+        self.assertFalse((harness / 'skills').exists())
+
+        full = self.work / 'full-project'
+        full.mkdir()
+        self.run_cli('kit/init_harness.py', '--path', full)
+        self.assertTrue((full / '.harness/memory/MEMORY.md').exists())
+        self.assertTrue((full / '.harness/skills/README.md').exists())
+
+    def test_status_lists_issue_counts_instead_of_quality_score(self):
+        (self.project / 'src').mkdir()
+        self.init('--profile', 'compact')
+        output = self.run_cli('kit/status.py', '--root', self.work, '--depth', '1')
+        self.assertIn('问题/警告', output)
+        self.assertNotIn('健康分', output)
+
     def test_hook_default_silent_and_missing_session_silent(self):
         (self.project / 'src').mkdir()
         payload = json.dumps({'cwd': str(self.project), 'session_id': uuid.uuid4().hex})

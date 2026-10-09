@@ -1,20 +1,13 @@
 # -*- coding: utf-8 -*-
-"""harness 体检：检查一个项目的 harness 是否健康。
+"""检查 harness 文件结构与可识别的问题；不评估 AI 输出质量。
 
 用法：
     python -m kit.doctor --path "../my-project"
     python -m kit.doctor --path "..." --json
 
-检查六件事：
-    1. 缺件        PROJECT.md / TASKS.md / memory 三件套 / skills / 标记
-    2. 待补栏目    PROJECT.md 里还有多少「（待补）」没填
-    3. 记忆腐化    MEMORY.md 是否超限、日志是否积压太久没蒸馏
-    4. 记忆空转    检查点 / 叙事链 / 技能 是否长期为空
-    5. 版本落后    项目标记的版本 vs 当前 kit 版本
-    6. 入库策略    .gitignore 是否已忽略 memory/
+检查核心文件、任务状态、待补栏目、可选记忆长度及版本。
 """
 import argparse
-import datetime
 import os
 import re
 import sys
@@ -25,35 +18,15 @@ if __package__ in (None, ''):
 else:
     from . import core
 
-REQUIRED = [
-    ('STATE.json', '当前任务状态'),
-    ('PROJECT.md', '项目宪法'),
-    ('TASKS.md', '任务规则'),
-    ('memory/MEMORY.md', '长期记忆'),
-    ('memory/NARRATIVE.md', '叙事链'),
-    ('memory/CHECKPOINTS.md', '检查点'),
-    ('skills/README.md', '技能规范'),
-]
+REQUIRED = ['PROJECT.md', 'TASKS.md', 'STATE.json']
 
 PLACEHOLDER = '（待补）'
-
-
-def _parse_date(name):
-    m = re.match(r'^(\d{4})-(\d{2})-(\d{2})\.md$', name)
-    if not m:
-        return None
-    try:
-        return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-    except ValueError:
-        return None
 
 
 def check(path):
     path = os.path.normpath(os.path.abspath(path))
     wb = core.project_dir(path)
     cfg = core.get_config()
-    today = datetime.date.today()
-
     result = {
         'path': path,
         'exists': os.path.isdir(wb),
@@ -61,26 +34,23 @@ def check(path):
         'issues': [],
         'warnings': [],
         'notes': [],
-        'score': 100,
+        'optional': [],
     }
     if not result['exists']:
         result['issues'].append('这个项目尚未建 harness')
-        result['score'] = 0
         return result
 
     # 1) 缺件
     missing = []
-    for rel, label in REQUIRED:
+    for rel in REQUIRED:
         if not os.path.isfile(os.path.join(wb, rel.replace('/', os.sep))):
             missing.append(rel)
     if not os.path.exists(os.path.join(wb, core.HARNESS_MARK)):
         result['warnings'].append(
             '缺少 %s 标记（可能是手工搭的），建议补上——hook 靠它判断"已建过"'
             % core.HARNESS_MARK)
-        result['score'] -= 5
     if missing:
         result['issues'].append('缺件：%s' % '、'.join(missing))
-        result['score'] -= min(30, 10 * len(missing))
 
     result['structure_complete'] = not missing and os.path.isfile(os.path.join(wb, core.HARNESS_MARK))
     if os.path.isfile(os.path.join(wb, 'STATE.json')):
@@ -93,7 +63,6 @@ def check(path):
                 result['warnings'].append('任务标记完成，但缺少验收条件或验证记录')
         except core.DataError as error:
             result['issues'].append(str(error))
-            result['score'] -= 10
 
     # 2) 待补栏目
     proj = os.path.join(wb, 'PROJECT.md')
@@ -107,9 +76,6 @@ def check(path):
                                    % (n, PLACEHOLDER, len(sections)))
             if n >= 8:
                 result['warnings'].append('待补栏目较多，这份宪法目前对 AI 的约束力有限')
-                result['score'] -= 10
-            elif n >= 4:
-                result['score'] -= 5
 
     # 3) 记忆腐化
     mem = os.path.join(wb, 'memory')
@@ -123,36 +89,7 @@ def check(path):
                 result['warnings'].append(
                     'MEMORY.md 有 %d 字，超过建议上限 %d——该蒸馏了：能提炼成规则的挪进 '
                     'PROJECT.md，过时的删掉' % (size, limit))
-                result['score'] -= 10
-
-        logs = []
-        for fn in os.listdir(mem):
-            d = _parse_date(fn)
-            if d:
-                logs.append((d, fn))
-        logs.sort()
-        result['log_count'] = len(logs)
-        if logs:
-            oldest = logs[0][0]
-            age = (today - oldest).days
-            result['oldest_log_days'] = age
-            if age > 30:
-                result['warnings'].append(
-                    '最早的日志是 %s（%d 天前），已经积压——建议蒸馏进 MEMORY.md 后删掉'
-                    % (oldest.isoformat(), age))
-                result['score'] -= 10
-        elif os.path.isdir(mem):
-            result['notes'].append('memory/ 里还没有任何日期日志')
-
-        for name, label in (('CHECKPOINTS.md', '检查点'), ('NARRATIVE.md', '叙事链')):
-            p = os.path.join(mem, name)
-            if os.path.exists(p):
-                body = open(p, encoding='utf-8', errors='ignore').read()
-                # 去掉模板自带的说明文字后看是否有实际内容
-                body = re.sub(r'<!--.*?-->', '', body, flags=re.S)
-                body = re.sub(r'^#.*$', '', body, flags=re.M).strip()
-                if len(body) < 40:
-                    result['notes'].append('%s 还是空的——它是"下次从哪出发"的载体，建议开始记' % label)
+        result['optional'].append('memory/MEMORY.md（可选）')
 
     # 4) 技能层
     sk = os.path.join(wb, 'skills')
@@ -161,7 +98,7 @@ def check(path):
                  if os.path.isfile(os.path.join(sk, d, 'SKILL.md'))])
         result['skill_count'] = n
         if n == 0:
-            result['notes'].append('还没有沉淀任何技能——等到某个流程被重复用到第三次，就值得写一个')
+            result['optional'].append('skills/（可选；有可复用流程时再创建）')
 
     # 5) 版本
     meta = core.harness_meta(path)
@@ -169,18 +106,6 @@ def check(path):
     if kv and kv != core.KIT_VERSION:
         result['warnings'].append('项目标记的 kit 版本是 %s，当前是 %s——可跑 sync 补齐新文件'
                                   % (kv, core.KIT_VERSION))
-        result['score'] -= 5
-
-    # 6) gitignore
-    gi = os.path.join(path, '.gitignore')
-    if os.path.exists(gi):
-        t = open(gi, encoding='utf-8', errors='ignore').read()
-        if os.path.basename(wb) + '/memory/' in t:
-            result['notes'].append('已配置：memory 不入库 ✓')
-        else:
-            result['notes'].append('建议在 .gitignore 加 `%s/memory/`（日志私密，规则入库）' % os.path.basename(wb))
-
-    result['score'] = max(0, result['score'])
     return result
 
 
@@ -196,7 +121,7 @@ def main(argv=None):
         core.emit_json(r)
         return 1 if args.strict and (r['issues'] or r['warnings']) else 0
 
-    lines = ['体检对象：%s' % r['path'], '状态：%s ｜ 健康分：%d/100' % (r['state'], r['score']), '']
+    lines = ['体检对象：%s' % r['path'], 'Harness 状态：%s' % r['state'], '']
     if r['issues']:
         lines.append('【问题】')
         lines += ['  · ' + x for x in r['issues']]
@@ -208,6 +133,9 @@ def main(argv=None):
     if r['notes']:
         lines.append('【提示】')
         lines += ['  · ' + x for x in r['notes']]
+    if r['optional']:
+        lines.append('【可选扩展】')
+        lines += ['  · ' + x for x in r['optional']]
     if not (r['issues'] or r['warnings']):
         lines.append('没有发现需要处理的问题。')
     core.plain('\n'.join(lines))

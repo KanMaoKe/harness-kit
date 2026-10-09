@@ -1,6 +1,6 @@
 # harness-kit
 
-为 AI 协作项目生成可编辑、可检查的 harness 文件脚手架：项目约定、任务上下文、决策记忆和技能规范。
+为 AI 协作项目生成可编辑、可检查的项目上下文脚手架，提供完整与精简两种档位。默认完整档适合有设计、实施、验证和交接流程的复杂项目。
 
 **Python 3.8+ · 仅使用标准库 · Unity / Python / Web / 通用模板**
 
@@ -8,20 +8,20 @@
 
 | 功能 | 行为 |
 |---|---|
-| 初始化 | 检测项目类型，补齐项目约定、任务规则、记忆和技能文件 |
-| 体检 | 检查缺件、待补栏目、记忆长度和版本，输出建议及健康分 |
-| 总览 | 扫描多个项目，列出类型、harness 状态与健康分 |
+| 初始化 | 检测项目类型，生成项目规则、任务协作说明和状态文件；完整档另含记忆与技能指南 |
+| 体检 | 检查核心文件、任务状态、待补栏目、可选记忆长度和版本 |
+| 总览 | 扫描多个项目，列出类型、harness 状态及检查问题数 |
 | 同步 | 补缺件、更新版本标记，保留已有正文 |
 | 可选宿主接入 | 将技能安装到指定目录，或显式注册会话 hook |
 
-这是文件层的脚手架。检查点记录、记忆蒸馏、任务上下文选择和技能执行由用户或 AI 完成；未内置模型调用、BM25 / 向量检索、每轮自动注入或验收重试。健康分反映文件检查结果，不代表 AI 输出质量。
+这是文件层的脚手架。检查点记录、记忆蒸馏、任务上下文选择和技能执行由用户或 AI 完成；未内置模型调用、BM25 / 向量检索、每轮自动注入或验收重试。体检报告只列出可检查的问题，不给项目质量打分。
 
 ## 快速开始
 
 ```bash
 git clone https://github.com/KanMaoKe/harness-kit.git
 cd harness-kit
-python kit/init_harness.py --path "../my-project" --agents-md
+python kit/init_harness.py --path "../my-project" --agents-md  # 默认 comprehensive 档
 python kit/doctor.py --path "../my-project"
 ```
 
@@ -31,7 +31,7 @@ python kit/doctor.py --path "../my-project"
 python kit/init_harness.py --path "../my-project" --type generic --name "My Project"
 ```
 
-支持 `unity`、`python`、`web`、`generic`。检测按此顺序进行，未识别的目录使用通用模板。
+支持 `unity`、`python`、`web`、`generic`。检测按此顺序进行，未识别的目录使用通用模板。完整档适合需要阶段记忆与技能规范的大型项目；小项目可用 `--profile compact`，只生成核心文件。
 
 ## 文件结构与使用
 
@@ -41,17 +41,12 @@ python kit/init_harness.py --path "../my-project" --type generic --name "My Proj
 ├── TASKS.md               任务类型、上下文选择与工具使用规则
 ├── STATE.json             当前目标、验收、验证、阻塞及下一步
 ├── AGENTS.snippet.md      可供手动合并的项目入口片段
-├── memory/
-│   ├── MEMORY.md          稳定事实与长期决策
-│   ├── NARRATIVE.md       重要转折与决策来路
-│   ├── CHECKPOINTS.md     阶段进展、否决方案与搁置事项
-│   └── YYYY-MM-DD.md      初始化当天的日志
-├── skills/
-│   └── README.md          技能原子、显式流程与验收规范
 └── HARNESS.json           工具版本、项目类型等元数据
 ```
 
-初始化后补全 `PROJECT.md`，调整 `TASKS.md`，在 `STATE.json` 中记录当前任务。稳定规则留在项目约定，阶段状态只更新任务摘要，重要决策按需写入记忆。
+默认完整档另外生成 `memory/`（长期记忆、检查点、叙事和日期日志）与 `skills/README.md`。精简档省略这些扩展文件；两种档位共享以上核心结构。初始化后补全 `PROJECT.md`，调整 `TASKS.md`，在 `STATE.json` 中记录当前任务。稳定规则留在项目约定，阶段状态只更新任务摘要，重要决策按需写入现有设计记录或记忆。
+
+这些扩展记忆不要求和项目已有文档并存：长期约定进 `PROJECT.md`，当前接续点进 `STATE.json`；项目若已有 ADR、进度日志、Feature 注册表或技术债文档，应继续以现有体系为准，在 `TASKS.md` 里指向它们，避免复制维护。只有缺少合适载体时，再采用 `MEMORY.md`、`CHECKPOINTS.md`、`NARRATIVE.md` 或日期日志。
 
 ### 标准入口
 
@@ -97,9 +92,9 @@ python kit/resume.py --path "../my-project" --json
 
 `status` 可取 `not_started`、`in_progress`、`blocked`、`completed`。`goal`、`next_step`、`updated` 为字符串，其余三个字段为字符串数组。用户或 AI 在阶段结束时更新；任务完成需有验收与验证记录，缺失时恢复摘要和体检会提示。数组中的验证文字仍需真实证据支撑，工具不会替你执行或证明验证。
 
-任务摘要可能包含私人信息，可按需要额外忽略 `.harness/STATE.json`。
+任务摘要可能包含私人或团队信息；根据项目协作方式决定是否提交 `STATE.json`。记忆文件同样需要由项目自行决定共享策略，工具不会自动修改 `.gitignore`。
 
-手动在项目 `.gitignore` 中加入：
+如记忆内容不适合共享，可手动在项目 `.gitignore` 中加入：
 
 ```gitignore
 .harness/memory/
@@ -164,11 +159,13 @@ python install.py --uninstall
 
 | 命令 | 用途 |
 |---|---|
-| `python kit/init_harness.py --path "<项目>"` | 初始化或补齐 |
+| `python kit/init_harness.py --path "<项目>"` | 使用默认完整档初始化或补齐 |
+| `python kit/init_harness.py --path "<项目>" --profile compact` | 仅生成核心文件 |
 | `python kit/resume.py --path "<项目>" --json` | 读取任务恢复摘要；省略 `--json` 输出可读报告 |
 | `python kit/doctor.py --path "<项目>" --json` | 体检 JSON；省略 `--json` 输出可读报告 |
 | `python kit/status.py --root "<父目录>" --depth 1` | 总览直接子项目，可加 `--json` |
-| `python kit/sync.py --path "<项目>" --dry-run` | 预览补齐；省略 `--dry-run` 执行 |
+| `python kit/sync.py --path "<项目>" --dry-run` | 按项目记录的档位预览补齐；省略 `--dry-run` 执行 |
+| `python kit/sync.py --path "<项目>" --profile comprehensive` | 明确切换到完整档并补齐 |
 | `python kit/sync.py --root "<父目录>" --depth 1` | 批量补齐已有 harness 的子项目 |
 | `python kit/mute.py --path "<目录>"` | 静音；加 `--unmute` 解除 |
 | `python kit/mute.py --list` | 查看静音名单 |

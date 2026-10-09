@@ -10,7 +10,7 @@ import sys
 
 # ---- 路径解析 ----------------------------------------------------------------
 
-KIT_VERSION = '2.2'
+KIT_VERSION = '2.3'
 
 # 代码与模板所在目录（本文件在 <root>/kit/ 下）
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -325,7 +325,7 @@ def agents_content(path, existing=''):
     block = ('%s\n## Harness 项目协作\n\n'
              '- 先读取 `%s/PROJECT.md` 和 `%s/TASKS.md`，遵守已有项目指令。\n'
              '- 从 `%s/STATE.json` 恢复当前目标、下一步、阻塞与验收状态。\n'
-             '- 只按任务需要读取相关记忆及技能，不一次性加载完整历史。\n'
+             '- 只按任务需要读取相关文档和技能；可选记忆目录不要求存在。\n'
              '- 阶段结束时更新 STATE.json 中的验证结果和下一步；未验证不标记完成。\n'
              '%s\n' % (AGENTS_START, folder, folder, folder, AGENTS_END))
     if AGENTS_START not in existing and AGENTS_END not in existing:

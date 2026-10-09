@@ -21,3 +21,10 @@
 - 技能模板采用标准元数据，认知原语改为可选的拆分方法。
 - hook 移除操作只匹配本工具脚本，保留同一事件中的其他 hook。
 - 增加安装、兼容、覆盖保护和 hook 行为的回归测试。
+# 2.3.0
+
+- Keep the comprehensive harness as the default and add an opt-in compact profile for smaller projects.
+- Make task/context guidance explicit about manual execution; no implied automatic context injection or tool orchestration.
+- Preserve a project's selected profile during sync; sync never removes existing files.
+- Replace the structure health score with concrete issue and warning counts.
+- Clarify that memory and task-state sharing is a project privacy decision.

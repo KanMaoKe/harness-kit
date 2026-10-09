@@ -41,7 +41,9 @@ def scan(root, depth=1):
             state = core.harness_state(p)
             row = {'name': d, 'path': p, 'type': ptype, 'state': state}
             if state != 'none':
-                row['health'] = doctor.check(p)['score']
+                report = doctor.check(p)
+                row['issues'] = len(report['issues'])
+                row['warnings'] = len(report['warnings'])
             rows.append(row)
     rows.sort(key=lambda r: ({'full': 0, 'partial': 1, 'none': 2}[r['state']], r['name'].lower()))
     return rows
@@ -67,12 +69,12 @@ def main(argv=None):
     w = max(len(r['name']) for r in rows)
     lines = ['扫描：%s（深度 %d）' % (args.root, args.depth),
              '共 %d 个项目' % len(rows), '',
-             '%-*s  %-8s %-8s %-6s %s' % (w, '项目', '类型', '状态', '健康分', '路径')]
-    lines.append('-' * (w + 50))
+             '%-*s  %-8s %-8s %-8s %s' % (w, '项目', '类型', '状态', '问题/警告', '路径')]
+    lines.append('-' * (w + 56))
     for r in rows:
-        lines.append('%-*s  %-8s %-8s %-6s %s' % (
+        lines.append('%-*s  %-8s %-8s %-8s %s' % (
             w, r['name'], r['type'], icon[r['state']],
-            r.get('health', '-'), r['path']))
+            ('%d/%d' % (r['issues'], r['warnings'])) if 'issues' in r else '-', r['path']))
     full = sum(1 for r in rows if r['state'] == 'full')
     lines += ['', '已建 %d / 共 %d' % (full, len(rows))]
     core.plain('\n'.join(lines))

@@ -32,7 +32,7 @@ FILES = [
 ]
 
 
-def sync_one(path, dry_run=False, agents_md=False):
+def sync_one(path, dry_run=False, agents_md=False, profile=''):
     path = os.path.normpath(os.path.abspath(path))
     wb = core.project_dir(path)
     if not os.path.isdir(wb):
@@ -59,7 +59,11 @@ def sync_one(path, dry_run=False, agents_md=False):
     }
 
     added, existing = [], []
-    for rel, tpl, _ in FILES:
+    selected_profile = profile or meta.get('profile', 'comprehensive')
+    if selected_profile not in ('comprehensive', 'compact'):
+        raise core.DataError('HARNESS.json 中 profile 必须是 comprehensive 或 compact')
+    files = FILES if selected_profile == 'comprehensive' else FILES[:2]
+    for rel, tpl, _ in files:
         dest = os.path.join(wb, rel.replace('/', os.sep))
         if os.path.exists(dest):
             existing.append(rel)
@@ -99,6 +103,7 @@ def sync_one(path, dry_run=False, agents_md=False):
             'type': ptype,
             'project': name,
             'synced': time.strftime('%Y-%m-%d'),
+            'profile': selected_profile,
         })
         core.write_json(os.path.join(wb, core.HARNESS_MARK), meta)
 
@@ -113,6 +118,7 @@ def main(argv=None):
     ap.add_argument('--depth', type=int, default=1)
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--agents-md', action='store_true', help='创建或更新根目录 AGENTS.md 托管片段')
+    ap.add_argument('--profile', choices=('comprehensive', 'compact'), help='覆盖目标项目记录的模板档位')
     args = ap.parse_args(argv)
 
     targets = []
@@ -135,7 +141,7 @@ def main(argv=None):
     else:
         ap.error('需要 --path 或 --root')
 
-    results = [sync_one(t, args.dry_run, args.agents_md) for t in targets]
+    results = [sync_one(t, args.dry_run, args.agents_md, args.profile) for t in targets]
     ok = [r for r in results if r.get('ok')]
     changed = [r for r in ok if r.get('added') or r.get('version_updated')]
 
