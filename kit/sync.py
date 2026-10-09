@@ -6,8 +6,8 @@
     2. 更新 HARNESS.json 里的版本号
 
 用法：
-    python -m kit.sync --path "E:/student/Unity/Duel"
-    python -m kit.sync --root "E:/student/Unity" --depth 1     # 批量
+    python -m kit.sync --path "../my-project"
+    python -m kit.sync --root "../projects" --depth 1     # 批量
     python -m kit.sync --path "..." --dry-run                  # 只看会补什么
 """
 import argparse
@@ -33,9 +33,9 @@ FILES = [
 
 def sync_one(path, dry_run=False):
     path = os.path.normpath(os.path.abspath(path))
-    wb = os.path.join(path, '.workbuddy')
+    wb = core.project_dir(path)
     if not os.path.isdir(wb):
-        return {'ok': False, 'path': path, 'error': '没有 .workbuddy/，请先用 init_harness 生成'}
+        return {'ok': False, 'path': path, 'error': '没有 harness 目录，请先用 init_harness 生成'}
 
     meta = core.harness_meta(path)
     ptype = meta.get('type', '') or core.detect_project(path)[1] or 'generic'
@@ -52,6 +52,7 @@ def sync_one(path, dry_run=False):
         'CHECKPOINT_INTERVAL': cfg.get('checkpoint_interval', 5),
         'MEMORY_MAX_CHARS': cfg.get('memory_max_chars', 3000),
         'KIT_VERSION': core.KIT_VERSION,
+        'HARNESS_DIR': os.path.basename(wb),
     }
 
     added, existing = [], []
@@ -117,7 +118,7 @@ def main(argv=None):
                 continue
             for x in list(dirs):
                 p = os.path.join(cur, x)
-                if os.path.exists(os.path.join(p, '.workbuddy')):
+                if os.path.isdir(core.project_dir(p)):
                     targets.append(p)
     else:
         ap.error('需要 --path 或 --root')

@@ -10,7 +10,7 @@ import sys
 
 # ---- 路径解析 ----------------------------------------------------------------
 
-KIT_VERSION = '2.0'
+KIT_VERSION = '2.1'
 
 # 代码与模板所在目录（本文件在 <root>/kit/ 下）
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -19,17 +19,26 @@ SKILL_DIR = os.path.join(ROOT_DIR, 'skill', 'harness-init')
 
 
 def runtime_home():
-    """运行时状态目录（config.json / muted.json）。
-
-    优先级：$HARNESS_KIT_HOME > $CODEBUDDY_CONFIG_DIR/harness-kit > ~/.workbuddy/harness-kit
-    """
+    """Host-independent state directory; HARNESS_KIT_HOME overrides it."""
     env = os.environ.get('HARNESS_KIT_HOME')
-    if env:
-        return os.path.abspath(os.path.expanduser(env))
-    cb = os.environ.get('CODEBUDDY_CONFIG_DIR')
-    if cb:
-        return os.path.join(os.path.abspath(os.path.expanduser(cb)), 'harness-kit')
-    return os.path.join(os.path.expanduser('~'), '.workbuddy', 'harness-kit')
+    return os.path.abspath(os.path.expanduser(env or '~/.harness-kit'))
+
+
+def project_dir(path):
+    """Prefer .harness; reuse legacy .workbuddy only when it contains harness files."""
+    modern = os.path.join(path, '.harness')
+    legacy = os.path.join(path, '.workbuddy')
+    if os.path.isdir(modern):
+        return modern
+    if any(os.path.isfile(os.path.join(legacy, name))
+           for name in (HARNESS_MARK, 'PROJECT.md', 'TASKS.md')):
+        return legacy
+    return modern
+
+
+def host_config_dir():
+    value = os.environ.get('HARNESS_HOST_CONFIG_DIR') or os.environ.get('CODEBUDDY_CONFIG_DIR')
+    return os.path.abspath(os.path.expanduser(value)) if value else None
 
 
 def config_path():
@@ -63,8 +72,8 @@ def write_json(path, data):
 
 
 DEFAULT_CONFIG = {
-    'enabled': True,          # hook 总开关
-    'notify_scope': 'always',  # always | project-only
+    'enabled': False,          # hook 总开关
+    'notify_scope': 'project-only',  # always | project-only
     'once_per_session': True,
     'checkpoint_interval': 5,  # 每 N 轮一个检查点（写进生成的规范里）
     'memory_max_chars': 3000,  # MEMORY.md 建议上限，超过就该蒸馏
@@ -154,11 +163,11 @@ def detect_project(path):
 def harness_state(path):
     """项目 harness 状态：none / partial / full
 
-    - none    没有任何 .workbuddy/
-    - partial 有 .workbuddy/ 但没有 HARNESS.json 标记（旧式或手工建的）
+    - none    没有 harness 目录
+    - partial 有 harness 目录但没有 HARNESS.json 标记（旧式或手工建的）
     - full    有标记，说明是本工具生成的
     """
-    wb = os.path.join(path, '.workbuddy')
+    wb = project_dir(path)
     if not os.path.isdir(wb):
         return 'none'
     if os.path.exists(os.path.join(wb, HARNESS_MARK)):
@@ -168,7 +177,7 @@ def harness_state(path):
 
 def harness_meta(path):
     """读项目的 harness 标记，返回 dict（无则空）"""
-    return read_json(os.path.join(path, '.workbuddy', HARNESS_MARK), {})
+    return read_json(os.path.join(project_dir(path), HARNESS_MARK), {})
 
 
 # ---- 静音名单 ----------------------------------------------------------------

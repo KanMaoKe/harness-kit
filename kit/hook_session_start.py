@@ -29,8 +29,9 @@ def build_context(cwd, kind, extra, state, python_exe):
         python_exe, os.path.join(core.ROOT_DIR, 'kit', 'mute.py'), cwd)
 
     if state == 'partial':
-        situation = ('该目录已有 `.workbuddy/`，但缺少 `%s` 标记——'
+        situation = ('该目录已有 `{harness_dir}/`，但缺少 `%s` 标记——'
                      '可能是早期手工搭的，建议补齐缺失的部分并补上标记' % core.HARNESS_MARK)
+        situation = situation.replace('{harness_dir}', os.path.basename(core.project_dir(cwd)))
     else:
         situation = '该目录还没有任何 harness 结构'
 
@@ -41,12 +42,12 @@ def build_context(cwd, kind, extra, state, python_exe):
         '- 元信息：{extra}\n'
         '- harness 状态：{state} —— {situation}\n'
         '\n'
-        '请在**本轮回复的最开头**用 AskUserQuestion 主动问用户是否要建 harness，'
+        '在不打断当前任务的前提下，使用宿主的提问工具询问用户是否要建 harness，'
         '选项固定为三个：\n'
         '  1. 现在生成完整 harness（推荐）\n'
         '  2. 先不用，这次别问了\n'
         '  3. 这个项目以后都不用问\n'
-        '提问时用一句话说明：会在 `.workbuddy/` 下生成 PROJECT.md（项目宪法）、'
+        '提问时用一句话说明：会在 `{harness_dir}/` 下生成 PROJECT.md（项目宪法）、'
         'TASKS.md（任务规则）、memory/（记忆层：长期记忆 + 叙事链 + 检查点）、'
         'skills/（技能层）。不要展开长篇解释，也不要替用户做决定。\n'
         '\n'
@@ -56,19 +57,19 @@ def build_context(cwd, kind, extra, state, python_exe):
         '  - 选 2 → 什么都不做，正常继续用户原本的需求\n'
         '  - 选 3 → 执行：{mute_cmd}  然后告知已永久静音\n'
         '\n'
-        '如果用户本轮的问题本身很明确、与 harness 无关，仍然先问这一句——'
+        '如果用户已有明确任务，优先执行原任务；只在自然的空闲时机简短询问。'
         '这是会话开场的一次性确认，之后同一会话不会再触发。'
     ).format(cwd=cwd, kind=kind, extra=extra, state=state, situation=situation,
-             init_cmd=init_cmd, mute_cmd=mute_cmd)
+             init_cmd=init_cmd, mute_cmd=mute_cmd, harness_dir=os.path.basename(core.project_dir(cwd)))
 
 
 def main():
     data = core.read_stdin_json()
     cwd = data.get('cwd') or os.getcwd()
-    session_id = data.get('session_id') or 'nosession'
+    session_id = data.get('session_id')
 
     cfg = core.get_config()
-    if not cfg.get('enabled', True):
+    if not cfg.get('enabled', False):
         return
 
     cwd = os.path.normpath(cwd)
@@ -85,6 +86,10 @@ def main():
 
     # 同一会话只提示一次
     if cfg.get('once_per_session', True):
+        if not session_id:
+            return
+        import hashlib
+        session_id = hashlib.sha256(str(session_id).encode('utf-8')).hexdigest()
         flag = os.path.join(tempfile.gettempdir(), 'hkit_%s.flag' % session_id)
         if os.path.exists(flag):
             return

@@ -2,8 +2,8 @@
 """总览：扫描一个根目录下的所有项目，列出各自的 harness 状态。
 
 用法：
-    python -m kit.status --root "E:/student/Unity"
-    python -m kit.status --root "E:/student/Unity" --json
+    python -m kit.status --root "../projects"
+    python -m kit.status --root "../projects" --json
     python -m kit.status --root "..." --depth 2      # 多扫一层
 """
 import argparse

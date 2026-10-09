@@ -13,6 +13,7 @@
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -28,9 +29,9 @@ def settings_path():
     env = os.environ.get('HARNESS_KIT_SETTINGS')
     if env:
         return os.path.abspath(os.path.expanduser(env))
-    cb = os.environ.get('CODEBUDDY_CONFIG_DIR')
-    base = os.path.abspath(os.path.expanduser(cb)) if cb else \
-        os.path.join(os.path.expanduser('~'), '.workbuddy')
+    base = core.host_config_dir()
+    if not base:
+        raise ValueError('请指定 --settings、HARNESS_KIT_SETTINGS 或 HARNESS_HOST_CONFIG_DIR')
     return os.path.join(base, 'settings.json')
 
 
@@ -46,8 +47,29 @@ def entry():
     }
 
 
-def is_ours(e):
-    return 'harness-kit' in json.dumps(e)
+def is_ours_hook(hook):
+    script = os.path.normcase(os.path.abspath(os.path.join(core.ROOT_DIR, 'kit', 'hook_session_start.py')))
+    # Generated commands quote both paths. Match the actual script, not a shared filename.
+    return any(os.path.normcase(os.path.abspath(value)) == script
+               for value in re.findall(r'"([^"\n]+)"', hook.get('command', '')))
+
+
+def is_ours(entry):
+    return any(is_ours_hook(hook) for hook in entry.get('hooks', []))
+
+
+def without_ours(entries):
+    result = []
+    for item in entries:
+        if not is_ours(item):
+            result.append(item)
+            continue
+        remaining = [hook for hook in item.get('hooks', []) if not is_ours_hook(hook)]
+        if remaining:
+            updated = dict(item)
+            updated['hooks'] = remaining
+            result.append(updated)
+    return result
 
 
 def backup(p):
@@ -62,7 +84,11 @@ def main(argv=None):
     ap.add_argument('--settings', default='', help='settings.json 路径（默认自动探测）')
     args = ap.parse_args(argv)
 
-    path = args.settings or settings_path()
+    try:
+        path = args.settings or settings_path()
+    except ValueError as error:
+        core.plain(str(error))
+        return 1
     if not os.path.exists(path):
         core.plain('找不到配置文件：%s\n（宿主还没生成过 settings.json？先启动一次）' % path)
         return 1
@@ -72,8 +98,8 @@ def main(argv=None):
     if args.remove:
         hooks = data.get('hooks', {})
         ss = hooks.get('SessionStart', [])
-        kept = [e for e in ss if not is_ours(e)]
-        removed = len(ss) - len(kept)
+        kept = without_ours(ss)
+        removed = sum(is_ours_hook(h) for e in ss for h in e.get('hooks', []))
         if kept:
             hooks['SessionStart'] = kept
         else:
@@ -88,7 +114,7 @@ def main(argv=None):
 
     hooks = data.setdefault('hooks', {})
     ss = hooks.setdefault('SessionStart', [])
-    ss[:] = [e for e in ss if not is_ours(e)]
+    ss[:] = without_ours(ss)
     ss.append(entry())
 
     bk = backup(path)

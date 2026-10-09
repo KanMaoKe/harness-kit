@@ -1,214 +1,185 @@
 # harness-kit
 
-给项目一键铺一层 **harness** —— 包在 AI 外面的工程层，让每次对话的**起点更高、方向更准、产出可检查**。
+为 AI 协作项目生成可编辑、可检查的 harness 文件脚手架：项目约定、任务上下文、决策记忆和技能规范。
+
+**Python 3.8+ · 仅使用标准库 · Unity / Python / Web / 通用模板**
+
+> 设计参考了 B 站 UP 主 **千水_Asteroid** 的视频 [《【Agent】为什么游戏设计师需要搭建自己的 harness？》](https://www.bilibili.com/video/BV16Xbm6VEzd/)。本项目将其中的记忆分层、任务上下文与技能原子等思路整理为通用项目脚手架，并自行实现工具代码；这是个人实践项目，与 UP 主及其 Nebula 项目无隶属关系，也不代表其认可。感谢原作者的分享。
+
+## 能做什么
+
+| 功能 | 行为 |
+|---|---|
+| 初始化 | 检测项目类型，补齐项目约定、任务规则、记忆和技能文件 |
+| 体检 | 检查缺件、待补栏目、记忆长度和版本，输出建议及健康分 |
+| 总览 | 扫描多个项目，列出类型、harness 状态与健康分 |
+| 同步 | 补缺件、更新版本标记，保留已有正文 |
+| 可选宿主接入 | 将技能安装到指定目录，或显式注册会话 hook |
+
+这是文件层的脚手架。检查点记录、记忆蒸馏、任务上下文选择和技能执行由用户或 AI 完成；未内置模型调用、BM25 / 向量检索、每轮自动注入或验收重试。健康分反映文件检查结果，不代表 AI 输出质量。
+
+## 快速开始
 
 ```bash
-python install.py                      # 安装
-python kit/init_harness.py --path ./my-project   # 给项目生成 harness
-```
-
-> **harness = 起点 + 方向 + 工具 + 检查**
-> 模型负责「想」，harness 负责「想之前」和「想之后」的一切。
-
----
-
-## 解决什么问题
-
-大模型每次拿到任务，都像被扔进迷宫入口：只带着任务描述和训练时的知识，昨天走过的捷径今天就忘了。
-今天状态好就走出去了，明天状态差就卡在第三个路口——**这就是「迷宫悖论」**。
-
-harness 破解它的方式是改变两件事：
-
-| | 手段 | 作用 |
-|---|---|---|
-| **起点** | 记忆植入 | 上次走到哪、踩过哪些坑、哪条路对了 → 下次从离出口更近的地方起步 |
-| **方向** | 判断标准植入 | 不再是靠直觉选路，而是带着标准选路 |
-
-这个工具把这两件事变成了每个项目里的一套文件。
-
----
-
-## 安装
-
-需要 Python 3.8+。
-
-```bash
-git clone <this-repo> harness-kit
+git clone https://github.com/KanMaoKe/harness-kit.git
 cd harness-kit
-python install.py --in-place     # 就地安装（推荐）
+python kit/init_harness.py --path "../my-project"
+python kit/doctor.py --path "../my-project"
 ```
 
-三种模式：
+目标项目目录需要已存在。命令行直接可用，无需安装、API Key 或宿主配置。
 
-| 模式 | 命令 | 代码放在哪 |
-|---|---|---|
-| **就地安装** ★ | `python install.py --in-place` | 就在 clone 目录——文件位置完全由你掌握 |
-| 复制安装 | `python install.py` | `~/.workbuddy/harness-kit/` |
-| 指定位置 | `python install.py --to "E:/tools/harness-kit"` | 你指定的目录 |
+```bash
+python kit/init_harness.py --path "../my-project" --type generic --name "My Project"
+```
 
-不管哪种模式，安装脚本都会：
+支持 `unity`、`python`、`web`、`generic`。检测按此顺序进行，未识别的目录使用通用模板。
 
-1. 让工具包可被执行（就地模式不复制任何代码）
-2. 注册 `SessionStart` hook 到 `~/.workbuddy/settings.json`（自动备份原文件）
-3. 把 `harness-init` 技能装进 `~/.workbuddy/skills/`
-4. 写入默认配置
+## 文件结构与使用
 
-> ⚠️ **hook 配置在宿主启动时快照，装完必须完全退出并重开宿主（AI 客户端）才生效。**
+```text
+<项目>/.harness/
+├── PROJECT.md             项目定位、架构、开发约定与禁止事项
+├── TASKS.md               任务类型、上下文选择与工具使用规则
+├── memory/
+│   ├── MEMORY.md          稳定事实与长期决策
+│   ├── NARRATIVE.md       重要转折与决策来路
+│   ├── CHECKPOINTS.md     阶段进展、否决方案与搁置事项
+│   └── YYYY-MM-DD.md      初始化当天的日志
+├── skills/
+│   └── README.md          技能原子、显式流程与验收规范
+└── HARNESS.json           工具版本、项目类型等元数据
+```
 
-卸载：
+初始化后补全 `PROJECT.md`，调整 `TASKS.md`，让 AI 根据任务读取相关文件。生成文件不保证任何宿主自动加载，需要通过项目指令、技能或手动提示接入。例如：
+
+```text
+请先读取 .harness/PROJECT.md 和 .harness/TASKS.md，
+根据当前任务选择相关记忆与技能。完成后记录关键决策、验证结果和未完成事项。
+```
+
+手动在项目 `.gitignore` 中加入：
+
+```gitignore
+.harness/memory/
+```
+
+规则与技能可以作为团队约定入库。提交前检查其中的私人信息和本机路径；工具不会修改 `.gitignore`。
+
+### 保留与覆盖
+
+初始化可重复运行，默认保留所有已有正文，仅补缺件并更新元数据，原始创建日期保留。
+
+```bash
+# 只有明确需要重写项目约定时才使用；先备份自定义约定
+python kit/init_harness.py --path "../my-project" --force
+```
+
+`--force` 仅允许覆盖 `PROJECT.md`；已有任务规则、技能和记忆正文仍保留。`sync` 同样只补缺件，不把已有正文迁移到新版模板。检查点轮次及日志“只追加”是文本约定，没有后台计数或定时记录。
+
+## 安装与宿主接入
+
+默认安装与宿主无关，不注册 hook、不安装到隐含的宿主技能目录。
+
+```bash
+python install.py --in-place
+```
+
+| 选项 | 行为 |
+|---|---|
+| `--in-place` | 直接使用当前仓库，移动仓库后需重新安装技能或 hook |
+| 不带位置选项 | 将代码复制到 `~/.harness-kit/code/` |
+| `--to "<工具安装目录>"` | 复制代码、模板、文档和技能源文件到指定目录 |
+| `--skill-dir "<技能父目录>"` | 安装 `harness-init/`，写入实际代码路径 |
+| `--host-config-dir "<宿主配置目录>"` | 技能安装到其 `skills/harness-init/`；仅凭此选项不注册 hook |
+| `--with-hook` | 显式注册 hook，需要指定宿主配置目录且已有 `settings.json` |
+| `--no-hook` | 兼容旧参数，默认行为就是不注册 hook |
+
+例如，将技能安装到你使用的 AI 客户端，或接入符合下述 hook 协议的宿主：
+
+```bash
+python install.py --in-place --host-config-dir "<宿主配置目录>"
+# 如确实需要会话提示，再显式注册
+python install.py --in-place --host-config-dir "<宿主配置目录>" --with-hook
+```
+
+hook 适配 `SessionStart` / `startup`、JSON 输入的 `cwd` 与 `session_id`，以及 `hookSpecificOutput.additionalContext` 输出。其他宿主需要适配事件和配置格式，不能只因支持 hooks 就认为兼容。
+
+注册前会备份配置并保留其他字段。注册后完全退出并重开宿主，验证是否生效。**即使注册 hook，开场提示默认仍关闭**；需要提示时，手动把运行配置 `enabled` 改为 `true`。提示指令要求优先执行已有明确任务，不打断用户。
+
+技能安装后的工具路径与运行状态目录分别维护，移动代码后重新安装即可。手动复制技能时，请将 `SKILL.md` 中的 `{{KIT_PATH}}` 替换为实际代码目录。
+
+### 卸载
 
 ```bash
 python install.py --uninstall
 ```
 
-（已生成到项目里的 `.workbuddy/` 不受影响。）
-
----
-
-## 用起来是什么效果
-
-装好并重启后，**每次会话开始**，工具会检查当前目录：
-
-```
-会话开始
-   │
-   ▼
-检查当前工作目录
-   │
-   ├─ 已建过 harness ─────→ 静默
-   ├─ 已被静音 ───────────→ 静默
-   └─ 其余情况 ───────────→ 提示 AI 主动问你
-                              │
-                              ▼
-                    「要不要给这个项目建 harness？」
-                    ① 现在生成  ② 这次别问  ③ 以后都别问
-```
-
-默认 `notify_scope = always`：**每个会话开场都问一次**，包括没被识别为典型项目的目录
-（这类目录会标注「未识别为典型项目」再由你决定）。嫌吵就改成 `project-only`，
-或对单个目录执行 `python kit/mute.py --path <目录>` 永久静音。
-
----
-
-## 生成的结构
-
-```
-<项目>/.workbuddy/
-├── PROJECT.md         项目宪法：定位、技术栈、目录地图、命名、架构、铁律、禁止事项
-├── TASKS.md           任务规则：不同场景注入什么上下文、暴露哪些工具
-├── memory/
-│   ├── MEMORY.md      长期记忆（蒸馏后的事实与决策）
-│   ├── NARRATIVE.md   叙事链：我是怎么一步步走到这里的
-│   ├── CHECKPOINTS.md 检查点：每 N 轮记决策、否掉的方案、搁置的事
-│   └── YYYY-MM-DD.md  当天日志（只追加）
-├── skills/
-│   └── README.md      技能规范：白盒五条 + 认知原语 + 验收三问
-└── HARNESS.json       标记文件
-```
-
-**为什么是这几件东西**（每一件都对应一个具体的失败模式）：
-
-| 文件 | 不写会怎样 |
-|---|---|
-| `PROJECT.md` | 每次对话都要重新交代项目背景，重复犯老错 |
-| `TASKS.md` | 上下文越积越厚，关键信息被稀释（**上下文会腐烂**） |
-| `MEMORY.md` | 记了很多但用不上——「记忆不是存了多少，而是下次从哪出发」 |
-| `CHECKPOINTS.md` | 否掉的方案反复拿出来重议，搁置的事悄悄消失 |
-| `NARRATIVE.md` | 只剩碎片，看不出"为什么变成现在这样" |
-| `skills/` | 同样的流程每次都重新推一遍 |
-
----
+移除安装记录中的 hook，保留代码、技能、配置和项目文件供手动清理。也可用 `--host-config-dir` 明确指定需移除 hook 的宿主目录。安装与卸载不再自动递归清理旧工具目录。
 
 ## 命令
 
-| 命令 | 作用 |
-|---|---|
-| `python kit/init_harness.py --path <项目>` | 生成 harness |
-| `python kit/doctor.py --path <项目>` | 体检：缺件 / 待补 / 记忆腐化 / 健康分 |
-| `python kit/status.py --root <目录> --depth 1` | 总览：所有项目的 harness 状态 |
-| `python kit/sync.py --path <项目>` | 补齐缺失文件、升级版本（不覆盖你的内容） |
-| `python kit/mute.py --path <项目>` | 静音，以后不再提示 |
-| `python kit/mute.py --list` | 查看静音名单 |
-| `python kit/install_hook.py [--remove]` | 安装 / 卸载 hook |
+以下命令在仓库目录运行，其他位置使用脚本绝对路径。
 
----
+| 命令 | 用途 |
+|---|---|
+| `python kit/init_harness.py --path "<项目>"` | 初始化或补齐 |
+| `python kit/doctor.py --path "<项目>" --json` | 体检 JSON；省略 `--json` 输出可读报告 |
+| `python kit/status.py --root "<父目录>" --depth 1` | 总览直接子项目，可加 `--json` |
+| `python kit/sync.py --path "<项目>" --dry-run` | 预览补齐；省略 `--dry-run` 执行 |
+| `python kit/sync.py --root "<父目录>" --depth 1` | 批量补齐已有 harness 的子项目 |
+| `python kit/mute.py --path "<目录>"` | 静音；加 `--unmute` 解除 |
+| `python kit/mute.py --list` | 查看静音名单 |
+| `python kit/install_hook.py --settings "<settings.json>"` | 注册 hook；加 `--remove` 移除 |
+
+`init_harness` 和 `sync` 输出 JSON。`doctor` 发现问题也返回退出码 0，自动化时需解析 `issues`、`warnings` 和 `score`。
 
 ## 配置
 
-`~/.workbuddy/harness-kit/config.json`：
+运行状态默认放在 `~/.harness-kit/`，与项目文件和宿主配置分离。
 
 ```json
 {
-  "enabled": true,
-  "notify_scope": "always",
+  "enabled": false,
+  "notify_scope": "project-only",
   "once_per_session": true,
   "checkpoint_interval": 5,
   "memory_max_chars": 3000
 }
 ```
 
-| 字段 | 默认 | 说明 |
-|---|---|---|
-| `enabled` | `true` | hook 总开关，`false` 完全静默 |
-| `notify_scope` | `always` | `always` 所有会话都提示；`project-only` 只对识别为项目的目录提示 |
-| `once_per_session` | `true` | 同一会话是否只问一次 |
-| `checkpoint_interval` | `5` | 每多少轮写一个检查点（写进生成的规范里） |
-| `memory_max_chars` | `3000` | `MEMORY.md` 建议上限，超过就该蒸馏 |
+| 字段 | 说明 |
+|---|---|
+| `enabled` | hook 提示开关，不影响命令行 |
+| `notify_scope` | `project-only` 只提示识别出的项目；`always` 包含普通目录 |
+| `once_per_session` | 按 session ID 去重；缺少 ID 时不提示，避免跨会话误判 |
+| `checkpoint_interval` | 写入新模板的检查点轮次约定，不自动计数 |
+| `memory_max_chars` | 新模板的记忆长度建议及体检阈值 |
 
----
+| 环境变量 | 用途 |
+|---|---|
+| `HARNESS_KIT_HOME` | 覆盖运行状态目录，也改变默认代码复制目标的父目录 |
+| `HARNESS_HOST_CONFIG_DIR` | 显式宿主配置目录，命令行位置参数优先 |
+| `HARNESS_KIT_SETTINGS` | 单独注册工具的配置文件路径，`--settings` 优先；安装器不读取 |
 
-## 目录结构
+安装器会保留已有运行配置。更改配置不会自动改写已生成的项目文件。
 
-```
-harness-kit/
-├── install.py               一键安装 / 卸载
-├── kit/                     工具本体
-│   ├── core.py              路径解析、项目检测、状态判断
-│   ├── init_harness.py      生成器
-│   ├── doctor.py            体检
-│   ├── status.py            总览
-│   ├── sync.py              补齐 / 升级
-│   ├── mute.py              静音管理
-│   ├── hook_session_start.py  SessionStart hook
-│   └── install_hook.py      hook 注册
-├── templates/               模板
-│   ├── unity/ python/ web/ generic/    各类型 PROJECT.md
-│   └── common/                         记忆层与技能规范
-├── skill/harness-init/      给 AI 的技能说明
-└── docs/                    设计说明
+## 开发与验证
+
+`kit/` 为命令行与 hook 实现，`templates/` 为项目类型及通用模板，`skill/` 为技能源文件，`tests/` 为行为回归测试。
+
+```bash
+python -m unittest discover -s tests -v
 ```
 
----
+欢迎提交模板与宿主适配改进。模板变更请说明生成结果及对已有项目的影响。参见 [贡献指南](CONTRIBUTING.md) 与 [变更记录](CHANGELOG.md)。
 
-## 设计取向
+- [项目设计检查](docs/项目设计检查.md)：公开方案对照、当前限制与改进优先级。
+- [设计说明](docs/设计说明.md)：设计背景与文件分层。
+- [机制对照](docs/机制对照.md)：参考视频与模板设计的对应。“落地”包括文本规范，不代表全部运行时自动实现。
 
-四条取舍，说清楚免得误解：
+## 来源与许可
 
-1. **默认所有会话都问一次**（`notify_scope: always`）。
-   这是「让每个项目都记得住」的初衷——宁可多问一次，也不要漏掉一个值得建 harness 的目录。
-   代价是临时目录也会被问，靠三层收敛压噪音：只问一次 / 可永久静音 / 已建过的静默。
-   想要更安静，改成 `project-only` 就只在识别为项目时问。
-2. **只提示，不擅自生成**：hook 只把「问一句」这件事交给 AI 执行，
-   真正建不建、建在哪，永远由你在开场那一刻拍板。
-3. **记忆是私密的**：生成的 `.gitignore` 建议是 `PROJECT.md` / `TASKS.md` / `skills/` 入库，
-   `memory/` 不入库——记录是给自己看的。
-4. **不给每个项目套同一个模板**：`PROJECT.md` 生成后需要填，尤其是「禁止事项」——
-   踩过一次就写一条，那一栏会随时间变成最便宜的护栏。
+原视频及其中的第三方内容归各自权利人所有；本仓库的 MIT 许可不构成对原视频、字幕或其他第三方素材的再授权。
 
-延伸阅读：
-
-- [docs/设计说明.md](docs/设计说明.md) —— 每个设计决定背后的理由
-- [docs/机制对照.md](docs/机制对照.md) —— 逐条对照视频里的机制，哪些落地、哪些不落地
-
----
-
-## 兼容性
-
-为支持 hooks 机制的 AI 编程宿主设计（`SessionStart` 事件 + 宿主配置文件注入）。
-核心生成逻辑（`init_harness.py` / `doctor.py` / `status.py`）不依赖任何宿主，可单独当命令行工具用。
-
----
-
-## License
-
-MIT
+本项目代码与自行编写的文档采用 [MIT License](LICENSE)。

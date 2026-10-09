@@ -2,7 +2,7 @@
 """harness 体检：检查一个项目的 harness 是否健康。
 
 用法：
-    python -m kit.doctor --path "E:/student/Unity/Duel"
+    python -m kit.doctor --path "../my-project"
     python -m kit.doctor --path "..." --json
 
 检查六件事：
@@ -49,7 +49,7 @@ def _parse_date(name):
 
 def check(path):
     path = os.path.normpath(os.path.abspath(path))
-    wb = os.path.join(path, '.workbuddy')
+    wb = core.project_dir(path)
     cfg = core.get_config()
     today = datetime.date.today()
 
@@ -63,7 +63,7 @@ def check(path):
         'score': 100,
     }
     if not result['exists']:
-        result['issues'].append('这个项目还没有 .workbuddy/，尚未建 harness')
+        result['issues'].append('这个项目尚未建 harness')
         result['score'] = 0
         return result
 
@@ -161,10 +161,10 @@ def check(path):
     gi = os.path.join(path, '.gitignore')
     if os.path.exists(gi):
         t = open(gi, encoding='utf-8', errors='ignore').read()
-        if '.workbuddy/memory/' in t:
+        if os.path.basename(wb) + '/memory/' in t:
             result['notes'].append('已配置：memory 不入库 ✓')
         else:
-            result['notes'].append('建议在 .gitignore 加 `.workbuddy/memory/`（日志私密，规则入库）')
+            result['notes'].append('建议在 .gitignore 加 `%s/memory/`（日志私密，规则入库）' % os.path.basename(wb))
 
     result['score'] = max(0, result['score'])
     return result

@@ -2,12 +2,12 @@
 """在指定项目里生成一套 harness 结构。
 
 用法：
-    python -m kit.init_harness --path "E:/student/Unity/Duel"
+    python -m kit.init_harness --path "../my-project"
     python -m kit.init_harness --path "..." --type unity --name Duel
     python -m kit.init_harness --path "..." --force      # 已存在时重建（谨慎）
 
 生成：
-    <path>/.workbuddy/
+    <path>/.harness/
     ├── PROJECT.md           项目宪法（长期约定）
     ├── TASKS.md             任务类型 → 上下文注入规则
     ├── memory/
@@ -39,7 +39,7 @@ def main(argv=None):
     ap.add_argument('--path', required=True, help='项目根目录')
     ap.add_argument('--type', default='', help='unity / python / web / generic（默认自动检测）')
     ap.add_argument('--name', default='', help='项目名（默认取目录名）')
-    ap.add_argument('--force', action='store_true', help='已有 harness 时强制重建')
+    ap.add_argument('--force', action='store_true', help='明确允许覆盖 PROJECT.md（记忆及其他已有正文仍保留）')
     args = ap.parse_args(argv)
 
     root = os.path.normpath(os.path.abspath(args.path))
@@ -47,23 +47,11 @@ def main(argv=None):
         core.emit_json({'ok': False, 'error': '目录不存在: %s' % root})
         return 1
 
-    state = core.harness_state(root)
-    if state == 'full' and not args.force:
-        core.emit_json({
-            'ok': False,
-            'error': '%s 已存在，说明这个项目已经建过 harness。如需重建请加 --force' % core.HARNESS_MARK,
-        })
-        return 1
-
     _, detected, meta = core.detect_project(root)
-    ptype = args.type or detected or 'generic'
-    name = args.name or os.path.basename(root.rstrip('\\/')) or 'project'
+    ptype = args.type or core.harness_meta(root).get('type') or detected or 'generic'
+    name = args.name or core.harness_meta(root).get('project') or os.path.basename(root.rstrip('\\/')) or 'project'
     cfg = core.get_config()
     today = time.strftime('%Y-%m-%d')
-
-    tpl_path = _tpl(ptype, 'PROJECT.md.tpl')
-    if not os.path.exists(tpl_path):
-        tpl_path = _tpl('generic', 'PROJECT.md.tpl')
 
     uv = meta.get('unity_version') or core.unity_version(root)
     vars_ = {
@@ -77,7 +65,8 @@ def main(argv=None):
         'KIT_VERSION': core.KIT_VERSION,
     }
 
-    wb = os.path.join(root, '.workbuddy')
+    wb = core.project_dir(root)
+    vars_['HARNESS_DIR'] = os.path.basename(wb)
     created, skipped = [], []
 
     def mkdir(p):
@@ -106,7 +95,8 @@ def main(argv=None):
     mkdir(os.path.join(wb, 'skills'))
 
     # 宪法与任务规则
-    put_tpl((ptype, 'PROJECT.md.tpl'), os.path.join(wb, 'PROJECT.md'))
+    put_tpl((ptype if os.path.isfile(_tpl(ptype, 'PROJECT.md.tpl')) else 'generic', 'PROJECT.md.tpl'),
+            os.path.join(wb, 'PROJECT.md'), overwrite=args.force)
     put_tpl(('common', 'TASKS.md.tpl'), os.path.join(wb, 'TASKS.md'), overwrite=False)
 
     # 记忆层：已有的绝不覆盖
@@ -122,11 +112,13 @@ def main(argv=None):
     # 技能规范
     put_tpl(('common', 'skills-README.md.tpl'), os.path.join(wb, 'skills', 'README.md'), overwrite=False)
 
-    # 标记
-    put(os.path.join(wb, core.HARNESS_MARK), core.fill(
-        '{\n  "kit_version": "{{KIT_VERSION}}",\n  "type": "{{TYPE}}",\n'
-        '  "project": "{{PROJECT_NAME}}",\n  "created": "{{DATE}}",\n'
-        '  "generated_by": "harness-kit"\n}\n', vars_))
+    # Preserve existing metadata, including the original creation date.
+    meta = core.harness_meta(root)
+    meta.update({'kit_version': core.KIT_VERSION, 'type': ptype,
+                 'project': name, 'generated_by': 'harness-kit'})
+    meta.setdefault('created', today)
+    core.write_json(os.path.join(wb, core.HARNESS_MARK), meta)
+    created.append(os.path.relpath(os.path.join(wb, core.HARNESS_MARK), root).replace('\\', '/'))
 
     # gitignore 提示
     gi = os.path.join(root, '.gitignore')
@@ -137,15 +129,16 @@ def main(argv=None):
             txt = open(gi, encoding='utf-8', errors='ignore').read()
         except Exception:
             pass
-        if '.workbuddy/memory/' in txt:
+        if os.path.basename(wb) + '/memory/' in txt:
             gi_hint = '已配置：memory 不入库'
         else:
-            gi_hint = ('建议在 .gitignore 加一行 `.workbuddy/memory/`'
+            gi_hint = ('建议在 .gitignore 加一行 `%s/memory/`' % os.path.basename(wb) +
                        '（日志是私人的，PROJECT.md / TASKS.md / skills 建议入库）')
 
     core.emit_json({
         'ok': True,
         'path': root,
+        'harness_dir': wb,
         'type': ptype,
         'name': name,
         'created': created,
