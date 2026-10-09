@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""把 harness-kit 的 SessionStart hook 注册进 WorkBuddy 的 settings.json。
+"""把 harness-kit 的 SessionStart hook 注册进宿主的 settings.json。
 
 用法：
     python -m kit.install_hook                 # 安装
@@ -8,7 +8,7 @@
 
 会自动备份原文件为 settings.json.bak-<时间戳>。
 
-⚠️ hook 配置在 WorkBuddy 启动时快照，改完必须**完全退出并重开**才生效。
+⚠️ hook 配置在宿主启动时快照，改完必须**完全退出并重开**才生效。
 """
 import argparse
 import json
@@ -64,7 +64,7 @@ def main(argv=None):
 
     path = args.settings or settings_path()
     if not os.path.exists(path):
-        core.plain('找不到配置文件：%s\n（WorkBuddy 还没生成过 settings.json？先启动一次）' % path)
+        core.plain('找不到配置文件：%s\n（宿主还没生成过 settings.json？先启动一次）' % path)
         return 1
 
     data = json.load(open(path, encoding='utf-8'))
@@ -83,7 +83,7 @@ def main(argv=None):
         bk = backup(path)
         json.dump(data, open(path, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
         core.plain('已卸载 %d 条 harness-kit hook\n备份：%s' % (removed, bk))
-        core.plain('⚠️ 需要完全退出并重开 WorkBuddy 才生效')
+        core.plain('⚠️ 需要完全退出并重开宿主才生效')
         return 0
 
     hooks = data.setdefault('hooks', {})
@@ -103,7 +103,7 @@ def main(argv=None):
                '备份：%s\n'
                '触发命令：\n  %s\n'
                '\n原有顶层字段保留：%s\n'
-               '⚠️ 需要完全退出并重开 WorkBuddy 才生效（hook 配置在启动时快照）'
+               '⚠️ 需要完全退出并重开宿主才生效（hook 配置在启动时快照）'
                % (path, bk, hook_command(), ', '.join(check.keys())))
     return 0
 

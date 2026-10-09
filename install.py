@@ -5,7 +5,7 @@
 三种安装模式：
 
   1. 复制安装（默认）
-     把工具包复制到 WorkBuddy 配置目录下（~/.workbuddy/harness-kit/）
+     把工具包复制到宿主配置目录下（~/.workbuddy/harness-kit/）
      适合：不想让仓库位置和安装位置耦合
 
   2. 就地安装（--in-place）★ 推荐
@@ -115,7 +115,7 @@ def register_hook(install_dir):
     setp = os.path.join(wb_config_dir(), 'settings.json')
     if not os.path.exists(setp):
         print('· 找不到 settings.json（%s），跳过 hook 注册' % setp)
-        print('  先启动一次 WorkBuddy 生成配置，再重新运行 install.py')
+        print('  先启动一次宿主（AI 客户端）生成配置，再重新运行 install.py')
         return False
 
     script = os.path.join(install_dir, 'kit', 'hook_session_start.py').replace('\\', '/')
@@ -234,7 +234,7 @@ def do_install(args):
     print('  python "<KIT>/kit/status.py" --root "<目录>" --depth 1  # 总览')
     print('  python "<KIT>/kit/sync.py" --path "<项目>"              # 补齐升级')
     print()
-    print('⚠️ 注册了 hook 的话，需要完全退出并重开 WorkBuddy 才生效')
+    print('⚠️ 注册了 hook 的话，需要完全退出并重开宿主（AI 客户端）才生效')
     return 0
 
 
@@ -292,7 +292,7 @@ def do_uninstall(args):
 
     print()
     print('已生成到项目里的 .workbuddy/ 不受影响，如需清理请自行删除。')
-    print('⚠️ 需要完全退出并重开 WorkBuddy 才生效')
+    print('⚠️ 需要完全退出并重开宿主（AI 客户端）才生效')
     return 0
 
 

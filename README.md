@@ -53,8 +53,7 @@ python install.py --in-place     # 就地安装（推荐）
 3. 把 `harness-init` 技能装进 `~/.workbuddy/skills/`
 4. 写入默认配置
 
-> ⚠️ **hook 配置在启动时快照，装完必须完全退出并重开 WorkBuddy 才生效。**
-> 关于「哪些文件必须留在 C 盘、哪些能迁到别的盘」，见 [docs/部署与迁移.md](docs/部署与迁移.md)。
+> ⚠️ **hook 配置在宿主启动时快照，装完必须完全退出并重开宿主（AI 客户端）才生效。**
 
 卸载：
 
@@ -200,13 +199,12 @@ harness-kit/
 
 - [docs/设计说明.md](docs/设计说明.md) —— 每个设计决定背后的理由
 - [docs/机制对照.md](docs/机制对照.md) —— 逐条对照视频里的机制，哪些落地、哪些不落地
-- [docs/部署与迁移.md](docs/部署与迁移.md) —— 哪些文件必须留 C 盘、哪些能迁、怎么迁
 
 ---
 
 ## 兼容性
 
-为 WorkBuddy / CodeBuddy 的 hooks 机制设计（`SessionStart` 事件 + `settings.json`）。
+为支持 hooks 机制的 AI 编程宿主设计（`SessionStart` 事件 + 宿主配置文件注入）。
 核心生成逻辑（`init_harness.py` / `doctor.py` / `status.py`）不依赖任何宿主，可单独当命令行工具用。
 
 ---
