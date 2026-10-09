@@ -1,0 +1,28 @@
+# 运行时状态（从仓库目录直接跑时生成，不要提交）
+config.json
+muted.json
+
+# 分发产物（从仓库重新打包即可，不入库）
+*.zip
+dist/
+build/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 备份文件（安装/卸载时自动生成）
+*.bak-*
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 测试产物
+/tmp-test/
+examples/*/.workbuddy/memory/
