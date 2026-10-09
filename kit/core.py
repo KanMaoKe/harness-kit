@@ -12,7 +12,7 @@ import sys
 
 KIT_VERSION = '2.0'
 
-#: 代码与模板所在目录（本文件在 <root>/kit/ 下）
+# 代码与模板所在目录（本文件在 <root>/kit/ 下）
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES_DIR = os.path.join(ROOT_DIR, 'templates')
 SKILL_DIR = os.path.join(ROOT_DIR, 'skill', 'harness-init')
@@ -42,7 +42,7 @@ def muted_path():
 
 # ---- 基础工具 ----------------------------------------------------------------
 
-#: 项目内 harness 的标记文件名
+# 项目内 harness 的标记文件名
 HARNESS_MARK = 'HARNESS.json'
 
 
@@ -78,24 +78,10 @@ def get_config():
 
 
 def ensure_config():
-    """首次运行时落一份带注释的默认配置"""
+    """首次运行时落一份默认配置"""
     p = config_path()
     if not os.path.exists(p):
-        payload = {
-            'enabled': True,
-            'notify_scope': 'always',
-            'once_per_session': True,
-            'checkpoint_interval': 5,
-            'memory_max_chars': 3000,
-            '_说明': {
-                'enabled': 'hook 总开关，false = 完全静默',
-                'notify_scope': 'always = 所有会话都提示；project-only = 只在识别为项目时提示',
-                'once_per_session': '同一会话是否只问一次',
-                'checkpoint_interval': '每多少轮写一个检查点（写进生成的记忆规范）',
-                'memory_max_chars': 'MEMORY.md 建议上限，超过就该蒸馏进 PROJECT.md',
-            },
-        }
-        write_json(p, payload)
+        write_json(p, dict(DEFAULT_CONFIG))
     return p
 
 

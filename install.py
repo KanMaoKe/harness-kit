@@ -83,13 +83,6 @@ def write_default_config():
         'once_per_session': True,
         'checkpoint_interval': 5,
         'memory_max_chars': 3000,
-        '_说明': {
-            'enabled': 'hook 总开关，false = 完全静默',
-            'notify_scope': 'always = 所有会话都问；project-only = 只在识别为项目时问',
-            'once_per_session': '同一会话是否只问一次',
-            'checkpoint_interval': '每多少轮写一个检查点（写进生成的记忆规范）',
-            'memory_max_chars': 'MEMORY.md 建议上限',
-        },
     }, open(cfg, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
     return cfg, True
 
