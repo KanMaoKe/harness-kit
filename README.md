@@ -1,6 +1,6 @@
 # harness-kit
 
-为 AI 协作项目生成可编辑、可检查的项目上下文脚手架，提供完整与精简两种档位。默认完整档适合有设计、实施、验证和交接流程的复杂项目。
+为 AI 协作项目生成可编辑、可检查的项目上下文脚手架。默认只生成精简核心；设计、ADR、Bug、Session、技术债和 Feature 等治理模块按需启用。
 
 **Python 3.8+ · 仅使用标准库 · Unity / Python / Web / 通用模板**
 
@@ -21,7 +21,7 @@
 ```bash
 git clone https://github.com/KanMaoKe/harness-kit.git
 cd harness-kit
-python kit/init_harness.py --path "../my-project" --agents-md  # 默认 comprehensive 档
+python kit/init_harness.py --path "../my-project" --agents-md
 python kit/doctor.py --path "../my-project"
 ```
 
@@ -31,7 +31,14 @@ python kit/doctor.py --path "../my-project"
 python kit/init_harness.py --path "../my-project" --type generic --name "My Project"
 ```
 
-支持 `unity`、`python`、`web`、`generic`。检测按此顺序进行，未识别的目录使用通用模板。完整档适合需要阶段记忆与技能规范的大型项目；小项目可用 `--profile compact`，只生成核心文件。
+支持 `unity`、`python`、`web`、`generic`。检测按此顺序进行，未识别的目录使用通用模板。默认 compact 仅生成核心文件；需要通用记忆与技能指南时显式使用 `--profile comprehensive`。治理模块通过 `--modules` 独立启用，不依赖档位。
+
+```bash
+python kit/init_harness.py --path "../my-project" --modules bugs,design,adr,debt
+python kit/init_harness.py --path "../my-project" --modules debt --debt-storage entries
+```
+
+Bug 模块固定采用条目式；技术债默认生成 `TECH_DEBT.md` 清单，也可选 `entries`。停用模块只更新配置，不删除已有文件。模块选择前应先检查项目现有 issue tracker、设计记录和队列，避免建立重复的权威记录。
 
 ## 文件结构与使用
 
@@ -44,7 +51,7 @@ python kit/init_harness.py --path "../my-project" --type generic --name "My Proj
 └── HARNESS.json           工具版本、项目类型等元数据
 ```
 
-默认完整档另外生成 `memory/`（长期记忆、检查点、叙事和日期日志）与 `skills/README.md`。精简档省略这些扩展文件；两种档位共享以上核心结构。初始化后补全 `PROJECT.md`，调整 `TASKS.md`，在 `STATE.json` 中记录当前任务。稳定规则留在项目约定，阶段状态只更新任务摘要，重要决策按需写入现有设计记录或记忆。
+默认不生成 `memory/`、`skills/` 或治理模块。`--profile comprehensive` 会另外生成 `memory/`（长期记忆、检查点、叙事和日期日志）与 `skills/README.md`。初始化后补全 `PROJECT.md`，调整 `TASKS.md`，在 `STATE.json` 中记录当前任务。稳定规则留在项目约定，阶段状态只更新任务摘要，重要决策按需写入现有设计记录或记忆。
 
 这些扩展记忆不要求和项目已有文档并存：长期约定进 `PROJECT.md`，当前接续点进 `STATE.json`；项目若已有 ADR、进度日志、Feature 注册表或技术债文档，应继续以现有体系为准，在 `TASKS.md` 里指向它们，避免复制维护。只有缺少合适载体时，再采用 `MEMORY.md`、`CHECKPOINTS.md`、`NARRATIVE.md` 或日期日志。
 
@@ -159,13 +166,17 @@ python install.py --uninstall
 
 | 命令 | 用途 |
 |---|---|
-| `python kit/init_harness.py --path "<项目>"` | 使用默认完整档初始化或补齐 |
-| `python kit/init_harness.py --path "<项目>" --profile compact` | 仅生成核心文件 |
+| `python kit/init_harness.py --path "<项目>"` | 使用精简核心初始化或补齐 |
+| `python kit/init_harness.py --path "<项目>" --profile comprehensive` | 增加通用记忆和技能指南 |
+| `python kit/init_harness.py --path "<项目>" --modules bugs,adr,debt` | 启用指定可选模块 |
+| `python kit/init_harness.py --path "<项目>" --modules debt --debt-storage entries` | 技术债使用条目式目录 |
 | `python kit/resume.py --path "<项目>" --json` | 读取任务恢复摘要；省略 `--json` 输出可读报告 |
 | `python kit/doctor.py --path "<项目>" --json` | 体检 JSON；省略 `--json` 输出可读报告 |
 | `python kit/status.py --root "<父目录>" --depth 1` | 总览直接子项目，可加 `--json` |
 | `python kit/sync.py --path "<项目>" --dry-run` | 按项目记录的档位预览补齐；省略 `--dry-run` 执行 |
-| `python kit/sync.py --path "<项目>" --profile comprehensive` | 明确切换到完整档并补齐 |
+| `python kit/sync.py --path "<项目>" --profile comprehensive` | 增加通用记忆和技能指南 |
+| `python kit/sync.py --path "<项目>" --modules bugs,adr` | 启用模块并仅补齐缺失模板 |
+| `python kit/sync.py --path "<项目>" --disable-modules bugs` | 停用模块配置，不删除已有文件 |
 | `python kit/sync.py --root "<父目录>" --depth 1` | 批量补齐已有 harness 的子项目 |
 | `python kit/mute.py --path "<目录>"` | 静音；加 `--unmute` 解除 |
 | `python kit/mute.py --list` | 查看静音名单 |

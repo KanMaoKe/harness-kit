@@ -15,8 +15,10 @@ import sys
 if __package__ in (None, ''):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from kit import core
+    from kit import modules
 else:
     from . import core
+    from . import modules
 
 REQUIRED = ['PROJECT.md', 'TASKS.md', 'STATE.json']
 
@@ -102,6 +104,14 @@ def check(path):
 
     # 5) 版本
     meta = core.harness_meta(path)
+    try:
+        module_config = modules.configuration(meta)
+        for rel, _ in modules.file_specs(module_config):
+            if not os.path.isfile(os.path.join(wb, rel.replace('/', os.sep))):
+                result['issues'].append('已启用模块缺少文件：%s' % rel)
+        result['enabled_modules'] = modules.active(module_config)
+    except ValueError as error:
+        result['issues'].append(str(error))
     kv = meta.get('kit_version', '')
     if kv and kv != core.KIT_VERSION:
         result['warnings'].append('项目标记的 kit 版本是 %s，当前是 %s——可跑 sync 补齐新文件'

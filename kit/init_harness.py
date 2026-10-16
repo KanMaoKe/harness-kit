@@ -26,8 +26,10 @@ import time
 if __package__ in (None, ''):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from kit import core
+    from kit import modules
 else:
     from . import core
+    from . import modules
 
 
 def _tpl(*parts):
@@ -41,7 +43,12 @@ def main(argv=None):
     ap.add_argument('--name', default='', help='项目名（默认取目录名）')
     ap.add_argument('--force', action='store_true', help='明确允许覆盖 PROJECT.md（其他已有文件仍保留）')
     ap.add_argument('--profile', choices=('comprehensive', 'compact'), default='',
-                    help='comprehensive 适合复杂项目（默认）；compact 只生成核心文件')
+                    help='comprehensive 额外生成通用记忆和技能指南；新项目默认 compact')
+    ap.add_argument('--modules', default='',
+                    help='启用可选模块，逗号分隔：bugs,design,adr,sessions,debt,features')
+    ap.add_argument('--disable-modules', default='', help='停用指定模块但保留已有文件，逗号分隔')
+    ap.add_argument('--debt-storage', choices=('list', 'entries'),
+                    help='技术债存储方式：list（默认）或 entries')
     ap.add_argument('--agents-md', action='store_true', help='创建或更新根目录 AGENTS.md 的托管片段，保留其他内容')
     args = ap.parse_args(argv)
 
@@ -54,9 +61,22 @@ def main(argv=None):
     existing_meta = core.harness_meta(root)
     ptype = args.type or existing_meta.get('type') or detected or 'generic'
     name = args.name or existing_meta.get('project') or os.path.basename(root.rstrip('\\/')) or 'project'
-    profile = args.profile or existing_meta.get('profile', 'comprehensive')
+    managed_marker = os.path.isfile(os.path.join(core.project_dir(root), core.HARNESS_MARK))
+    legacy_default = 'comprehensive' if managed_marker else 'compact'
+    profile = args.profile or existing_meta.get('profile', legacy_default)
     if profile not in ('comprehensive', 'compact'):
         core.emit_json({'ok': False, 'error': 'HARNESS.json 中 profile 必须是 comprehensive 或 compact'})
+        return 2
+    try:
+        enable_modules = modules.parse_selection(args.modules)
+        disable_modules = modules.parse_selection(args.disable_modules)
+        if set(enable_modules).intersection(disable_modules):
+            raise ValueError('同一模块不能同时启用和停用')
+        module_config = modules.update_configuration(
+            modules.configuration(existing_meta), enable_modules, disable_modules,
+            args.debt_storage)
+    except ValueError as error:
+        core.emit_json({'ok': False, 'error': str(error)})
         return 2
     cfg = core.get_config()
     if args.agents_md:
@@ -123,10 +143,17 @@ def main(argv=None):
         mkdir(os.path.join(wb, 'skills'))
         put_tpl(('common', 'skills-README.md.tpl'), os.path.join(wb, 'skills', 'README.md'), overwrite=False)
 
+    # Optional governance modules are additive and never overwrite project files.
+    for rel, template in modules.file_specs(module_config):
+        dest = os.path.join(wb, rel.replace('/', os.sep))
+        mkdir(os.path.dirname(dest))
+        put_tpl(('modules', template), dest, overwrite=False)
+
     # Preserve existing metadata, including the original creation date.
     meta = core.harness_meta(root)
     meta.update({'kit_version': core.KIT_VERSION, 'type': ptype,
-                 'project': name, 'generated_by': 'harness-kit', 'profile': profile})
+                 'project': name, 'generated_by': 'harness-kit', 'profile': profile,
+                 'modules': module_config})
     meta.setdefault('created', today)
     core.write_json(os.path.join(wb, core.HARNESS_MARK), meta)
     created.append(os.path.relpath(os.path.join(wb, core.HARNESS_MARK), root).replace('\\', '/'))
@@ -155,10 +182,11 @@ def main(argv=None):
         'type': ptype,
         'name': name,
         'profile': profile,
+        'enabled_modules': modules.active(module_config),
         'created': created,
         'skipped': skipped,
         'gitignore_hint': gi_hint,
-        'next': '补全 PROJECT.md 中与当前项目有关的内容；按需启用记忆或技能目录',
+        'next': '补全 PROJECT.md 中与当前项目有关的内容；可按需启用治理模块',
     })
     return 0
 

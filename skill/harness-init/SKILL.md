@@ -15,6 +15,8 @@ description: 为项目初始化或补齐 harness 项目规则、任务上下文�
 python "{{KIT_PATH}}/kit/init_harness.py" --path "<项目>"
 ```
 
+新项目默认只生成精简核心。需要记忆和技能指南时显式传入 `--profile comprehensive`。治理模块通过 `--modules bugs,design,adr,sessions,debt,features` 选择，技术债可用 `--debt-storage list|entries` 指定组织方式。
+
 新项目默认写入 `.harness/`。处理已有项目时，以 JSON 输出的 `harness_dir` 为准。
 
 默认补齐缺件，保留已有正文，重复执行也不会覆盖 `PROJECT.md`。只有用户明确要求重写项目约定时才使用 `--force`；它仍不会覆盖记忆、任务规则和技能正文。
@@ -22,6 +24,8 @@ python "{{KIT_PATH}}/kit/init_harness.py" --path "<项目>"
 如用户要求接入标准项目入口，初始化或同步时添加 `--agents-md`，只维护根目录 `AGENTS.md` 中标记的片段。默认生成的 `AGENTS.snippet.md` 可供手动合并。
 
 初始化后，结合项目补全 `PROJECT.md`，提醒用户手动将相应 `<harness目录>/memory/` 加入 `.gitignore`。不要将整个记忆目录一次性注入上下文。
+
+用户要求由 AI 判断是否需要扩展时，先检查项目现有文档、Issue/任务跟踪方式和目录约定，再说明每个模块的依据、现有等效机制和可能重复的文件；得到用户选择或明确授权后才启用。没有授权时保持精简核心，不自动添加模块。Bug 启用后固定使用条目式目录；技术债默认清单式，可在确有单文件检索/协作压力时选择条目式。模块只提供模板，不推导出强制评审流程。
 
 ## 恢复任务
 
@@ -43,5 +47,7 @@ python "{{KIT_PATH}}/kit/status.py" --root "<父目录>" --depth 1
 ```
 
 根据体检结果报告缺件、待补内容与记忆长度建议。`sync` 补齐缺失文件、更新标记，不迁移已有正文。检查点写入、记忆蒸馏与任务上下文读取由 AI 或用户执行，不是后台自动行为。
+
+`sync` 可用 `--modules` 启用缺失模块模板，或用 `--disable-modules` 停用配置；停用不会删除已有文件。组织方式变更也不会迁移或覆盖旧记录。
 
 已有明确任务时优先完成当前任务，不主动打断用户询问初始化。

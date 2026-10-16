@@ -78,15 +78,14 @@ class HarnessRegressionTests(unittest.TestCase):
         self.init('--type', 'custom')
         self.assertTrue((self.project / '.harness/PROJECT.md').exists())
 
-    def test_full_and_compact_profiles_and_sync_preserve_choice(self):
-        result = self.init('--profile', 'compact')
+    def test_compact_is_default_and_comprehensive_is_opt_in(self):
+        result = self.init()
         harness = self.project / '.harness'
         self.assertEqual(result['profile'], 'compact')
         self.assertFalse((harness / 'memory').exists())
         self.assertFalse((harness / 'skills').exists())
         report = json.loads(self.run_cli('kit/doctor.py', '--path', self.project, '--json'))
         self.assertTrue(report['structure_complete'])
-        self.init()
         self.assertEqual(json.loads((harness / 'HARNESS.json').read_text())['profile'], 'compact')
         self.run_cli('kit/sync.py', '--path', self.project)
         self.assertFalse((harness / 'memory').exists())
@@ -94,9 +93,55 @@ class HarnessRegressionTests(unittest.TestCase):
 
         full = self.work / 'full-project'
         full.mkdir()
-        self.run_cli('kit/init_harness.py', '--path', full)
+        self.run_cli('kit/init_harness.py', '--path', full, '--profile', 'comprehensive')
         self.assertTrue((full / '.harness/memory/MEMORY.md').exists())
         self.assertTrue((full / '.harness/skills/README.md').exists())
+
+    def test_modules_generate_additively_and_doctor_checks_enabled_files(self):
+        result = self.init('--modules', 'bugs,design,adr,debt,features,sessions')
+        harness = self.project / '.harness'
+        self.assertEqual(set(result['enabled_modules']),
+                         {'bugs', 'design', 'adr', 'debt', 'features', 'sessions'})
+        for rel in ('bugs/README.md', 'bugs/BUG_TEMPLATE.md', 'design/DESIGN_TEMPLATE.md',
+                    'adrs/ADR_TEMPLATE.md', 'sessions/SESSION_TEMPLATE.md',
+                    'features/FEATURE_REGISTRY.md', 'TECH_DEBT.md', 'RECORDS.md'):
+            self.assertTrue((harness / rel).is_file(), rel)
+        bug_template = (harness / 'bugs/BUG_TEMPLATE.md').read_bytes().decode('utf-8')
+        self.assertIn('\u73af\u5883\u4e0e\u590d\u73b0', bug_template)
+        report = json.loads(self.run_cli('kit/doctor.py', '--path', self.project, '--json'))
+        self.assertFalse(report['issues'])
+        (harness / 'bugs/README.md').unlink()
+        report = json.loads(self.run_cli('kit/doctor.py', '--path', self.project, '--json'))
+        self.assertTrue(any('bugs/README.md' in issue for issue in report['issues']))
+
+    def test_debt_storage_and_disabling_preserve_files(self):
+        self.init('--modules', 'debt', '--debt-storage', 'entries')
+        harness = self.project / '.harness'
+        self.assertTrue((harness / 'debt/DEBT_TEMPLATE.md').is_file())
+        self.assertFalse((harness / 'TECH_DEBT.md').exists())
+        custom = harness / 'debt/DEBT-0001-example.md'
+        custom.write_text('custom entry', encoding='utf-8')
+        self.run_cli('kit/sync.py', '--path', self.project, '--disable-modules', 'debt')
+        meta = json.loads((harness / 'HARNESS.json').read_text(encoding='utf-8'))
+        self.assertFalse(meta['modules']['debt']['enabled'])
+        self.assertEqual(custom.read_text(encoding='utf-8'), 'custom entry')
+        self.assertTrue((harness / 'debt/DEBT_TEMPLATE.md').exists())
+
+    def test_legacy_profile_without_metadata_keeps_comprehensive_sync(self):
+        self.init('--profile', 'comprehensive')
+        marker = self.project / '.harness/HARNESS.json'
+        meta = json.loads(marker.read_text(encoding='utf-8'))
+        del meta['profile']
+        marker.write_text(json.dumps(meta), encoding='utf-8')
+        (self.project / '.harness/memory/MEMORY.md').unlink()
+        self.run_cli('kit/sync.py', '--path', self.project)
+        self.assertTrue((self.project / '.harness/memory/MEMORY.md').exists())
+
+    def test_module_args_validate_before_writing(self):
+        result = json.loads(self.run_cli('kit/init_harness.py', '--path', self.project,
+                                         '--modules', 'bugs,unknown', expected=2))
+        self.assertFalse(result['ok'])
+        self.assertFalse((self.project / '.harness').exists())
 
     def test_status_lists_issue_counts_instead_of_quality_score(self):
         (self.project / 'src').mkdir()

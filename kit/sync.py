@@ -18,8 +18,10 @@ import time
 if __package__ in (None, ''):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from kit import core
+    from kit import modules
 else:
     from . import core
+    from . import modules
 
 # (相对路径, 模板路径, 是否属于记忆层)
 FILES = [
@@ -32,7 +34,8 @@ FILES = [
 ]
 
 
-def sync_one(path, dry_run=False, agents_md=False, profile=''):
+def sync_one(path, dry_run=False, agents_md=False, profile='', enable_modules='',
+             disable_modules='', debt_storage=''):
     path = os.path.normpath(os.path.abspath(path))
     wb = core.project_dir(path)
     if not os.path.isdir(wb):
@@ -63,12 +66,36 @@ def sync_one(path, dry_run=False, agents_md=False, profile=''):
     if selected_profile not in ('comprehensive', 'compact'):
         raise core.DataError('HARNESS.json 中 profile 必须是 comprehensive 或 compact')
     files = FILES if selected_profile == 'comprehensive' else FILES[:2]
+    try:
+        enable = modules.parse_selection(enable_modules)
+        disable = modules.parse_selection(disable_modules)
+        if set(enable).intersection(disable):
+            raise ValueError('同一模块不能同时启用和停用')
+        module_config = modules.update_configuration(
+            modules.configuration(meta), enable, disable, debt_storage or None)
+    except ValueError as error:
+        raise core.DataError(str(error))
+
     for rel, tpl, _ in files:
         dest = os.path.join(wb, rel.replace('/', os.sep))
         if os.path.exists(dest):
             existing.append(rel)
             continue
         src = os.path.join(core.TEMPLATES_DIR, *tpl)
+        if not os.path.exists(src):
+            continue
+        if not dry_run:
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, 'w', encoding='utf-8') as f:
+                f.write(core.fill(core.read_text(src), vars_))
+        added.append(rel)
+
+    for rel, template in modules.file_specs(module_config):
+        dest = os.path.join(wb, rel.replace('/', os.sep))
+        if os.path.exists(dest):
+            existing.append(rel)
+            continue
+        src = os.path.join(core.TEMPLATES_DIR, 'modules', *template.split('/'))
         if not os.path.exists(src):
             continue
         if not dry_run:
@@ -97,6 +124,7 @@ def sync_one(path, dry_run=False, agents_md=False, profile=''):
 
     # 更新标记
     ver_changed = meta.get('kit_version') != core.KIT_VERSION
+    modules_changed = meta.get('modules', {}) != module_config
     if not dry_run:
         meta.update({
             'kit_version': core.KIT_VERSION,
@@ -104,11 +132,14 @@ def sync_one(path, dry_run=False, agents_md=False, profile=''):
             'project': name,
             'synced': time.strftime('%Y-%m-%d'),
             'profile': selected_profile,
+            'modules': module_config,
         })
         core.write_json(os.path.join(wb, core.HARNESS_MARK), meta)
 
     return {'ok': True, 'path': path, 'added': added, 'existing': existing,
-            'agents_md': entry, 'version_updated': ver_changed, 'dry_run': dry_run}
+            'enabled_modules': modules.active(module_config),
+            'agents_md': entry, 'version_updated': ver_changed,
+            'modules_updated': modules_changed, 'dry_run': dry_run}
 
 
 def main(argv=None):
@@ -119,6 +150,9 @@ def main(argv=None):
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--agents-md', action='store_true', help='创建或更新根目录 AGENTS.md 托管片段')
     ap.add_argument('--profile', choices=('comprehensive', 'compact'), help='覆盖目标项目记录的模板档位')
+    ap.add_argument('--modules', default='', help='启用模块，逗号分隔：bugs,design,adr,sessions,debt,features')
+    ap.add_argument('--disable-modules', default='', help='停用模块但保留文件，逗号分隔')
+    ap.add_argument('--debt-storage', choices=('list', 'entries'), help='技术债存储方式')
     args = ap.parse_args(argv)
 
     targets = []
@@ -141,9 +175,11 @@ def main(argv=None):
     else:
         ap.error('需要 --path 或 --root')
 
-    results = [sync_one(t, args.dry_run, args.agents_md, args.profile) for t in targets]
+    results = [sync_one(t, args.dry_run, args.agents_md, args.profile,
+                        args.modules, args.disable_modules, args.debt_storage) for t in targets]
     ok = [r for r in results if r.get('ok')]
-    changed = [r for r in ok if r.get('added') or r.get('version_updated')]
+    changed = [r for r in ok if r.get('added') or r.get('version_updated')
+               or r.get('modules_updated')]
 
     core.emit_json({
         'total': len(results),
