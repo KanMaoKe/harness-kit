@@ -45,7 +45,7 @@ Bug 模块固定采用条目式；技术债默认生成 `TECH_DEBT.md` 清单，
 ```text
 <项目>/.harness/
 ├── PROJECT.md             项目定位、架构、开发约定与禁止事项
-├── TASKS.md               任务类型、上下文选择与工具使用规则
+├── TASKS.md               任务类型、上下文选择、设计原则与工具使用规则
 ├── STATE.json             当前目标、验收、验证、阻塞及下一步
 ├── AGENTS.snippet.md      可供手动合并的项目入口片段
 └── HARNESS.json           工具版本、项目类型等元数据

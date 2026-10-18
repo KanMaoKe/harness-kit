@@ -78,6 +78,13 @@ class HarnessRegressionTests(unittest.TestCase):
         self.init('--type', 'custom')
         self.assertTrue((self.project / '.harness/PROJECT.md').exists())
 
+    def test_task_template_states_design_principles(self):
+        self.init()
+        text = (self.project / '.harness/TASKS.md').read_text(encoding='utf-8')
+        self.assertIn('设计与实现原则', text)
+        self.assertIn('SSOT', text)
+        self.assertNotIn('{{', text)
+
     def test_compact_is_default_and_comprehensive_is_opt_in(self):
         result = self.init()
         harness = self.project / '.harness'

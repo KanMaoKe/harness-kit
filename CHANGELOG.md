@@ -2,6 +2,7 @@
 
 ## 未发布
 
+- 任务协作模板新增「设计与实现原则」：SSOT、单一职责、YAGNI / Rule of Three、冲突裁决与按结构取舍；模板已覆盖的原则不重复写入。
 - 默认初始化改为 compact 精简核心；comprehensive 显式启用。
 - 新增可选设计、ADR、Bug、Session、技术债与 Feature 模块；Bug 固定条目式，技术债支持清单或条目式。
 - `sync` 支持增量添加和停用模块配置，停用不删除文件；`doctor` 检查已启用模块脚手架。
