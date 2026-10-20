@@ -2,14 +2,14 @@
 
 为 AI 协作项目生成可编辑、可检查的项目上下文脚手架。默认只生成精简核心；设计、ADR、Bug、Session、技术债和 Feature 等治理模块按需启用。
 
-**Python 3.8+ · 仅使用标准库 · Unity / Python / Web / 通用模板**
+**Python 3.8+ · 仅使用标准库 · 本地优先 · Unity / Python / Web / 通用模板**
 
 ## 能做什么
 
 | 功能 | 行为 |
 |---|---|
-| 初始化 | 检测项目类型，生成项目规则、任务协作说明和状态文件；完整档另含记忆与技能指南 |
-| 体检 | 检查核心文件、任务状态、待补栏目、可选记忆长度和版本 |
+| 初始化 | 先预览或直接生成项目规则、任务协作说明和状态文件；完整档另含记忆与技能指南；默认不进入 Git |
+| 体检 | 检查核心文件、任务状态、待补栏目、可选记忆、Git 归属、档案完整性和版本 |
 | 总览 | 扫描多个项目，列出类型、harness 状态及检查问题数 |
 | 同步 | 补缺件、更新版本标记，保留已有正文 |
 | 可选宿主接入 | 将技能安装到指定目录，或显式注册会话 hook |
@@ -21,17 +21,20 @@
 ```bash
 git clone https://github.com/KanMaoKe/harness-kit.git
 cd harness-kit
+python kit/init_harness.py --path "../my-project" --dry-run
 python kit/init_harness.py --path "../my-project" --agents-md
 python kit/doctor.py --path "../my-project"
 ```
 
-目标项目目录需要已存在。命令行直接可用，无需安装、API Key 或宿主配置。`--agents-md` 是可选入口接入，不希望修改项目根目录时省略即可。
+目标项目目录需要已存在。首次接入先运行 `init_harness --dry-run` 查看计划，确认后去掉该参数执行。`sync --dry-run` 只用于已经初始化过的项目。命令行直接可用，无需安装、API Key 或宿主配置。`--agents-md` 是可选入口接入，不希望修改项目根目录时省略即可。
 
 ```bash
 python kit/init_harness.py --path "../my-project" --type generic --name "My Project"
 ```
 
 支持 `unity`、`python`、`web`、`generic`。检测按此顺序进行，未识别的目录使用通用模板。默认 compact 仅生成核心文件；需要通用记忆与技能指南时显式使用 `--profile comprehensive`。治理模块通过 `--modules` 独立启用，不依赖档位。
+
+在 Git 工作副本里，初始化默认把 `.harness/` 写入当前工作副本的 `.git/info/exclude`，不改根 `.gitignore`，也不自动 `git add`、提交或推送。只有明确希望团队共享 harness 时才使用 `--share-harness`；`--local-only` 可显式重新启用默认行为。
 
 ```bash
 python kit/init_harness.py --path "../my-project" --modules bugs,design,adr,debt
@@ -47,7 +50,6 @@ Bug 模块固定采用条目式；技术债默认生成 `TECH_DEBT.md` 清单，
 ├── PROJECT.md             项目定位、架构、开发约定与禁止事项
 ├── TASKS.md               任务类型、上下文选择、设计原则与工具使用规则
 ├── STATE.json             当前目标、验收、验证、阻塞及下一步
-├── AGENTS.snippet.md      可供手动合并的项目入口片段
 └── HARNESS.json           工具版本、项目类型等元数据
 ```
 
@@ -57,7 +59,7 @@ Bug 模块固定采用条目式；技术债默认生成 `TECH_DEBT.md` 清单，
 
 ### 标准入口
 
-每个项目都会生成 `AGENTS.snippet.md`，可手动合并到客户端支持的项目指令中。指定 `--agents-md` 时，工具会创建项目根目录的 `AGENTS.md`，或在已有文件中维护以下标记之间的片段，保留片段外原有内容：
+需要项目入口时，指定 `--agents-md`。工具会创建项目根目录的 `AGENTS.md`，或在已有文件中维护以下标记之间的片段，保留片段外原有内容：
 
 ```text
 <!-- harness-kit:start -->
@@ -70,9 +72,11 @@ Bug 模块固定采用条目式；技术债默认生成 `TECH_DEBT.md` 清单，
 已有项目可先预览，再接入：
 
 ```bash
-python kit/sync.py --path "../my-project" --agents-md --dry-run
-python kit/sync.py --path "../my-project" --agents-md
+python kit/init_harness.py --path "../my-project" --agents-md --dry-run
+python kit/init_harness.py --path "../my-project" --agents-md
 ```
+
+已经生成过 harness 的项目，用 `sync --dry-run` 预览补缺件或升级。
 
 ### 恢复当前任务
 
@@ -99,15 +103,7 @@ python kit/resume.py --path "../my-project" --json
 
 `status` 可取 `not_started`、`in_progress`、`blocked`、`completed`。`goal`、`next_step`、`updated` 为字符串，其余三个字段为字符串数组。用户或 AI 在阶段结束时更新；任务完成需有验收与验证记录，缺失时恢复摘要和体检会提示。数组中的验证文字仍需真实证据支撑，工具不会替你执行或证明验证。
 
-任务摘要可能包含私人或团队信息；根据项目协作方式决定是否提交 `STATE.json`。记忆文件同样需要由项目自行决定共享策略，工具不会自动修改 `.gitignore`。
-
-如记忆内容不适合共享，可手动在项目 `.gitignore` 中加入：
-
-```gitignore
-.harness/memory/
-```
-
-规则与技能可以作为团队约定入库。提交前检查其中的私人信息和本机路径；工具不会修改 `.gitignore`。
+任务摘要可能包含私人或团队信息。工具默认把 `.harness/` 视为本地协作上下文，并在 Git 工作副本中通过 `.git/info/exclude` 避免误提交；该规则只影响当前工作副本。需要团队共享时使用 `--share-harness`，提交前仍需检查私人信息和本机路径。
 
 ### 保留与覆盖
 
@@ -167,7 +163,9 @@ python install.py --uninstall
 | 命令 | 用途 |
 |---|---|
 | `python kit/init_harness.py --path "<项目>"` | 使用精简核心初始化或补齐 |
+| `python kit/init_harness.py --path "<项目>" --dry-run` | 首次接入预览，不写文件 |
 | `python kit/init_harness.py --path "<项目>" --profile comprehensive` | 增加通用记忆和技能指南 |
+| `python kit/init_harness.py --path "<项目>" --share-harness` | 允许 `.harness/` 跟随项目进入 Git |
 | `python kit/init_harness.py --path "<项目>" --modules bugs,adr,debt` | 启用指定可选模块 |
 | `python kit/init_harness.py --path "<项目>" --modules debt --debt-storage entries` | 技术债使用条目式目录 |
 | `python kit/resume.py --path "<项目>" --json` | 读取任务恢复摘要；省略 `--json` 输出可读报告 |
@@ -184,7 +182,7 @@ python install.py --uninstall
 
 `init_harness` 和 `sync` 输出 JSON。配置损坏、JSON 顶层类型错误、配置字段非法或文件读写失败时，命令行输出 `ok: false` 与错误位置，退出码为 2；hook 则在 stderr 报错，stdout 保持为空。不存在的配置使用默认值，现有损坏配置不会静默重置。
 
-`doctor` 默认保留报告模式，发现结构问题或警告仍返回 0；CI 可用 `--strict`，此时发现问题或警告返回 1。`structure_complete` 表示必需文件齐全，与仅表示已有初始化标记的 `state: full` 分开。`sync` 单个或批量目标失败时返回 1，数据读取异常返回 2。
+`doctor` 默认保留报告模式，发现结构问题或警告仍返回 0；CI 可用 `--strict`，此时发现问题或警告返回 1。`structure_complete` 表示必需文件齐全，与仅表示已有初始化标记的 `state: full` 分开。默认本地私有的 harness 在 Git 中实际未被忽略，或显式共享的 harness 被忽略时，会报告不一致。`sync` 单个或批量目标失败时返回 1，数据读取异常返回 2。
 
 ## 配置
 

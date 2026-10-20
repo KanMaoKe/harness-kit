@@ -6,11 +6,12 @@
 import json
 import os
 import re
+import subprocess
 import sys
 
 # ---- 路径解析 ----------------------------------------------------------------
 
-KIT_VERSION = '2.4'
+KIT_VERSION = '2.5'
 
 # 代码与模板所在目录（本文件在 <root>/kit/ 下）
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -93,6 +94,10 @@ def write_json(path, data):
         os.makedirs(parent, exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def json_content(data):
+    return json.dumps(data, ensure_ascii=False, indent=2)
 
 
 DEFAULT_CONFIG = {
@@ -211,6 +216,130 @@ def harness_state(path):
 def harness_meta(path):
     """读项目的 harness 标记，返回 dict（无则空）"""
     return read_json(os.path.join(project_dir(path), HARNESS_MARK), {})
+
+
+GIT_VISIBILITIES = ('local', 'shared')
+
+
+def _git_dir_from_file(filename):
+    with open(filename, encoding='utf-8') as stream:
+        first = stream.readline().strip()
+    if not first.lower().startswith('gitdir:'):
+        raise DataError('%s: 无法识别 gitdir 指向' % filename)
+    value = first.split(':', 1)[1].strip()
+    if not value:
+        raise DataError('%s: gitdir 指向为空' % filename)
+    return os.path.normpath(os.path.join(os.path.dirname(filename), os.path.expanduser(value)))
+
+
+def _common_git_dir(git_dir):
+    common_file = os.path.join(git_dir, 'commondir')
+    if not os.path.isfile(common_file):
+        return git_dir
+    value = read_text(common_file).strip()
+    if not value:
+        raise DataError('%s: commondir 为空' % common_file)
+    return os.path.normpath(os.path.join(git_dir, os.path.expanduser(value)))
+
+
+def git_context(path):
+    """Find the Git worktree and local exclude file for a project path."""
+    current = os.path.normpath(os.path.abspath(path))
+    while True:
+        marker = os.path.join(current, '.git')
+        if os.path.isdir(marker):
+            repo_root = current
+            git_dir = marker
+            break
+        if os.path.isfile(marker):
+            repo_root = current
+            git_dir = _git_dir_from_file(marker)
+            break
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
+    git_dir = os.path.abspath(git_dir)
+    common_dir = os.path.abspath(_common_git_dir(git_dir))
+    harness_rel = os.path.relpath(project_dir(path), repo_root).replace('\\', '/')
+    pattern = harness_rel.rstrip('/') + '/'
+    return {
+        'repo_root': repo_root,
+        'git_dir': git_dir,
+        'common_dir': common_dir,
+        'exclude_path': os.path.join(common_dir, 'info', 'exclude'),
+        'pattern': pattern,
+    }
+
+
+def _exclude_lines(text):
+    return [line.strip() for line in text.splitlines()]
+
+
+def git_exclude_plan(path, visibility):
+    """Return a pure plan for maintaining the harness rule in .git/info/exclude."""
+    context = git_context(path)
+    if context is None:
+        return {'repository': False, 'changed': False, 'path': '', 'pattern': '',
+                'content': None, 'present': False}
+    exclude_path = context['exclude_path']
+    content = read_text(exclude_path) if os.path.isfile(exclude_path) else ''
+    pattern = context['pattern']
+    present = pattern in _exclude_lines(content)
+    changed = (visibility == 'local' and not present) or (
+        visibility == 'shared' and present)
+    if visibility == 'local' and not present:
+        if content and not content.endswith(('\n', '\r')):
+            content += '\n'
+        content += pattern + '\n'
+    elif visibility == 'shared' and present:
+        lines = content.splitlines()
+        content = '\n'.join(line for line in lines if line.strip() != pattern)
+        if content:
+            content += '\n'
+    context.update({'repository': True, 'changed': changed, 'path': exclude_path,
+                    'content': content, 'present': present})
+    return context
+
+
+def _git_check_ignored(path):
+    context = git_context(path)
+    if context is None:
+        return None
+    target = os.path.relpath(os.path.join(project_dir(path), HARNESS_MARK),
+                             context['repo_root']).replace('\\', '/')
+    try:
+        result = subprocess.run(
+            ['git', '-C', context['repo_root'], 'check-ignore', '--no-index', '-q', '--', target],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    return None
+
+
+def git_visibility_status(path):
+    """Describe whether the generated harness is actually ignored by Git."""
+    try:
+        context = git_context(path)
+    except DataError as error:
+        return {'repository': True, 'ignored': None, 'error': str(error)}
+    if context is None:
+        return {'repository': False, 'ignored': None}
+    detected = _git_check_ignored(path)
+    if detected is None:
+        try:
+            content = read_text(context['exclude_path']) if os.path.isfile(context['exclude_path']) else ''
+        except OSError as error:
+            return {'repository': True, 'ignored': None, 'error': str(error),
+                    'exclude_path': context['exclude_path'], 'pattern': context['pattern']}
+        detected = context['pattern'] in _exclude_lines(content)
+    return {'repository': True, 'ignored': detected,
+            'exclude_path': context['exclude_path'], 'pattern': context['pattern']}
 
 
 # ---- 静音名单 ----------------------------------------------------------------
@@ -338,23 +467,33 @@ def agents_content(path, existing=''):
     return existing[:start] + block.rstrip('\n') + existing[end + len(AGENTS_END):]
 
 
-def integrate_agents(path, dry_run=False):
+def agents_plan(path):
     filename = os.path.join(path, 'AGENTS.md')
-    with open(filename, 'r', encoding='utf-8', newline='') as stream:
-        existing = stream.read()
-    content = agents_content(path, existing)
-    if content != existing and not dry_run:
+    if os.path.exists(filename):
+        with open(filename, 'r', encoding='utf-8', newline='') as stream:
+            existing = stream.read()
+        content = agents_content(path, existing)
+    else:
+        existing = None
+        content = agents_content(path)
+    return {'path': filename, 'exists': existing is not None,
+            'content': content, 'changed': content != existing}
+
+
+def apply_agents(plan):
+    if not plan['changed']:
+        return
+    filename = plan['path']
+    if plan['exists']:
         with open(filename, 'w', encoding='utf-8', newline='') as stream:
-            stream.write(content)
-    return {'path': filename, 'changed': content != existing, 'dry_run': dry_run}
+            stream.write(plan['content'])
+    else:
+        with open(filename, 'x', encoding='utf-8') as stream:
+            stream.write(plan['content'])
 
 
 def plan_agents(path, dry_run=False):
-    filename = os.path.join(path, 'AGENTS.md')
-    if os.path.exists(filename):
-        return integrate_agents(path, dry_run)
-    content = agents_content(path)
+    plan = agents_plan(path)
     if not dry_run:
-        with open(filename, 'x', encoding='utf-8') as stream:
-            stream.write(content)
-    return {'path': filename, 'changed': True, 'dry_run': dry_run}
+        apply_agents(plan)
+    return {'path': plan['path'], 'changed': plan['changed'], 'dry_run': dry_run}

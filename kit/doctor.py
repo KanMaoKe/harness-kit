@@ -20,7 +20,7 @@ else:
     from . import core
     from . import modules
 
-REQUIRED = ['PROJECT.md', 'TASKS.md', 'STATE.json']
+REQUIRED = ['PROJECT.md', 'TASKS.md', 'STATE.json', core.HARNESS_MARK]
 
 PLACEHOLDER = '（待补）'
 
@@ -43,18 +43,16 @@ def check(path):
         return result
 
     # 1) 缺件
-    missing = []
-    for rel in REQUIRED:
-        if not os.path.isfile(os.path.join(wb, rel.replace('/', os.sep))):
-            missing.append(rel)
-    if not os.path.exists(os.path.join(wb, core.HARNESS_MARK)):
+    missing = [rel for rel in REQUIRED if rel != core.HARNESS_MARK
+               and not os.path.isfile(os.path.join(wb, rel.replace('/', os.sep)))]
+    if not os.path.isfile(os.path.join(wb, core.HARNESS_MARK)):
         result['warnings'].append(
-            '缺少 %s 标记（可能是手工搭的），建议补上——hook 靠它判断"已建过"'
-            % core.HARNESS_MARK)
+            '缺少 %s 标记（可能是手工搭的），建议补上' % core.HARNESS_MARK)
     if missing:
         result['issues'].append('缺件：%s' % '、'.join(missing))
 
-    result['structure_complete'] = not missing and os.path.isfile(os.path.join(wb, core.HARNESS_MARK))
+    result['structure_complete'] = (
+        not missing and os.path.isfile(os.path.join(wb, core.HARNESS_MARK)))
     if os.path.isfile(os.path.join(wb, 'STATE.json')):
         try:
             state = core.task_state(path)
@@ -104,6 +102,7 @@ def check(path):
 
     # 5) 版本
     meta = core.harness_meta(path)
+    profile = meta.get('profile', '')
     try:
         module_config = modules.configuration(meta)
         for rel, _ in modules.file_specs(module_config):
@@ -112,6 +111,30 @@ def check(path):
         result['enabled_modules'] = modules.active(module_config)
     except ValueError as error:
         result['issues'].append(str(error))
+    if profile and profile not in ('compact', 'comprehensive'):
+        result['issues'].append('HARNESS.json 中 profile 必须是 comprehensive 或 compact')
+    elif profile == 'comprehensive':
+        for rel in ('memory/MEMORY.md', 'memory/NARRATIVE.md',
+                    'memory/CHECKPOINTS.md', 'skills/README.md'):
+            if not os.path.isfile(os.path.join(wb, rel.replace('/', os.sep))):
+                result['issues'].append('comprehensive 档案缺少文件：%s' % rel)
+
+    visibility = meta.get('git_visibility', 'local')
+    if visibility and visibility not in core.GIT_VISIBILITIES:
+        result['issues'].append('HARNESS.json 中 git_visibility 必须是 local 或 shared')
+    elif visibility:
+        status = core.git_visibility_status(path)
+        if status.get('error'):
+            result['warnings'].append('无法检查 Git 忽略状态：%s' % status['error'])
+        elif status['repository']:
+            if visibility == 'local' and status['ignored'] is False:
+                result['warnings'].append(
+                    'harness 按默认或显式声明为本地私有，但当前 Git 未忽略 %s；可运行 sync 修复'
+                    % status['pattern'])
+            elif visibility == 'shared' and status['ignored'] is True:
+                result['warnings'].append(
+                    'harness 声明为与项目共享，但当前 Git 忽略了 %s'
+                    % status['pattern'])
     kv = meta.get('kit_version', '')
     if kv and kv != core.KIT_VERSION:
         result['warnings'].append('项目标记的 kit 版本是 %s，当前是 %s——可跑 sync 补齐新文件'

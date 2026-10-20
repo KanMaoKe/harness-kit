@@ -12,6 +12,7 @@ description: 为项目初始化或补齐 harness 项目规则、任务上下文�
 用户已指定目标目录时直接使用该目录，否则先确定项目根目录。
 
 ```bash
+python "{{KIT_PATH}}/kit/init_harness.py" --path "<项目>" --dry-run
 python "{{KIT_PATH}}/kit/init_harness.py" --path "<项目>"
 ```
 
@@ -19,11 +20,13 @@ python "{{KIT_PATH}}/kit/init_harness.py" --path "<项目>"
 
 新项目默认写入 `.harness/`。处理已有项目时，以 JSON 输出的 `harness_dir` 为准。
 
+首次接入先运行 `--dry-run` 展示将创建的目录、文件、入口变化和 Git 排除变化；确认后再执行同一初始化命令。`sync` 只用于已生成 harness 的项目。
+
 默认补齐缺件，保留已有正文，重复执行也不会覆盖 `PROJECT.md`。只有用户明确要求重写项目约定时才使用 `--force`；它仍不会覆盖记忆、任务规则和技能正文。
 
-如用户要求接入标准项目入口，初始化或同步时添加 `--agents-md`，只维护根目录 `AGENTS.md` 中标记的片段。默认生成的 `AGENTS.snippet.md` 可供手动合并。
+如用户要求接入标准项目入口，初始化或同步时添加 `--agents-md`，只维护根目录 `AGENTS.md` 中标记的片段。
 
-初始化后，结合项目补全 `PROJECT.md`，提醒用户手动将相应 `<harness目录>/memory/` 加入 `.gitignore`。不要将整个记忆目录一次性注入上下文。
+`.harness/` 默认属于本机协作上下文。目标位于 Git 工作副本时，初始化会把相应目录规则写入 `.git/info/exclude`，不修改根 `.gitignore`，也不自动暂存或提交。用户明确要求团队共享时才使用 `--share-harness`。初始化后结合项目补全 `PROJECT.md`，不要将整个记忆目录一次性注入上下文。
 
 用户要求由 AI 判断是否需要扩展时，先检查项目现有文档、Issue/任务跟踪方式和目录约定，再说明每个模块的依据、现有等效机制和可能重复的文件；得到用户选择或明确授权后才启用。没有授权时保持精简核心，不自动添加模块。Bug 启用后固定使用条目式目录；技术债默认清单式，可在确有单文件检索/协作压力时选择条目式。模块只提供模板，不推导出强制评审流程。
 

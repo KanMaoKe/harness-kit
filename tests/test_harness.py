@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 import uuid
 
@@ -14,8 +15,7 @@ from kit import core
 
 class HarnessRegressionTests(unittest.TestCase):
     def setUp(self):
-        self.work = ROOT / ('tmp-test/check-' + uuid.uuid4().hex)
-        self.work.mkdir(parents=True)
+        self.work = Path(tempfile.mkdtemp(prefix='harness-kit-test-'))
         self.project = self.work / 'project'
         self.project.mkdir()
         self.env = dict(os.environ, HARNESS_KIT_HOME=str(self.work / 'state'),
@@ -86,9 +86,12 @@ class HarnessRegressionTests(unittest.TestCase):
         self.assertNotIn('{{', text)
 
     def test_compact_is_default_and_comprehensive_is_opt_in(self):
-        result = self.init()
+        self.init()
         harness = self.project / '.harness'
-        self.assertEqual(result['profile'], 'compact')
+        meta = json.loads((harness / 'HARNESS.json').read_text())
+        self.assertEqual(meta['profile'], 'compact')
+        self.assertEqual(meta['git_visibility'], 'local')
+        self.assertFalse((harness / 'AGENTS.snippet.md').exists())
         self.assertFalse((harness / 'memory').exists())
         self.assertFalse((harness / 'skills').exists())
         report = json.loads(self.run_cli('kit/doctor.py', '--path', self.project, '--json'))
@@ -97,6 +100,9 @@ class HarnessRegressionTests(unittest.TestCase):
         self.run_cli('kit/sync.py', '--path', self.project)
         self.assertFalse((harness / 'memory').exists())
         self.assertFalse((harness / 'skills').exists())
+        project_text = (harness / 'PROJECT.md').read_text(encoding='utf-8')
+        self.assertEqual(project_text.count('```'), 2)
+        self.assertIn('```text\n.harness/\n', project_text)
 
         full = self.work / 'full-project'
         full.mkdir()
@@ -167,6 +173,8 @@ class HarnessRegressionTests(unittest.TestCase):
         self.assertEqual(self.run_cli('kit/hook_session_start.py', stdin=json.dumps({'cwd': str(self.project)})), '')
         result = json.loads(self.run_cli('kit/hook_session_start.py', stdin=payload))
         self.assertIn('.harness/', result['hookSpecificOutput']['additionalContext'])
+        self.assertIn('--profile comprehensive',
+                      result['hookSpecificOutput']['additionalContext'])
         self.assertEqual(self.run_cli('kit/hook_session_start.py', stdin=payload), '')
 
     def test_installer_explicit_paths_and_preserves_host_settings(self):
@@ -175,8 +183,8 @@ class HarnessRegressionTests(unittest.TestCase):
         settings = host / 'settings.json'
         settings.write_text('{"custom": 42}')
         code = self.work / 'installed-code'
-        # Source-contained destinations are intentionally rejected.
-        self.run_cli('install.py', '--to', code, expected=2)
+        self.run_cli('install.py', '--to', code)
+        self.assertTrue((code / 'kit/init_harness.py').is_file())
         self.run_cli('install.py', '--in-place')
         self.assertEqual(settings.read_text(), '{"custom": 42}')
         config = json.loads((self.work / 'state/config.json').read_text())
@@ -190,8 +198,12 @@ class HarnessRegressionTests(unittest.TestCase):
         self.assertEqual(json.loads(settings.read_text()), {'custom': 42})
         self.assertTrue((host / 'skills/harness-init/SKILL.md').exists())
 
+    def test_installer_rejects_source_contained_destination(self):
+        self.run_cli('install.py', '--to', ROOT / 'nested-install', expected=2)
+        self.assertFalse((ROOT / 'nested-install').exists())
+
     def test_copy_install_contains_skill_and_is_executable(self):
-        destination = ROOT.parent / ('harness-copy-test-' + uuid.uuid4().hex)
+        destination = Path(tempfile.mkdtemp(prefix='harness-kit-copy-')) / 'code'
         try:
             self.run_cli('install.py', '--to', destination, '--skill-dir', self.work / 'skills')
             self.assertTrue((destination / 'skill/harness-init/SKILL.md').is_file())
@@ -205,8 +217,8 @@ class HarnessRegressionTests(unittest.TestCase):
             self.assertIn(destination.as_posix(), skill)
         finally:
             if destination.exists():
-                assert destination.parent == ROOT.parent and destination.name.startswith('harness-copy-test-')
-                shutil.rmtree(destination)
+                assert destination.parent.name.startswith('harness-kit-copy-')
+                shutil.rmtree(destination.parent)
 
     def test_hook_removal_preserves_unrelated_and_shared_entries(self):
         from kit import install_hook
@@ -229,7 +241,7 @@ class HarnessRegressionTests(unittest.TestCase):
         agents.write_bytes(original.encode('utf-8'))
         self.init()
         self.assertEqual(agents.read_bytes(), original.encode('utf-8'))
-        self.assertTrue((self.project / '.harness/AGENTS.snippet.md').is_file())
+        self.assertFalse((self.project / '.harness/AGENTS.snippet.md').exists())
         self.init('--agents-md')
         first = agents.read_bytes()
         self.assertTrue(first.startswith(original.encode('utf-8')))
@@ -237,6 +249,88 @@ class HarnessRegressionTests(unittest.TestCase):
         self.init('--agents-md')
         self.assertEqual(agents.read_bytes(), first)
         self.assertEqual(first.count(b'<!-- harness-kit:start -->'), 1)
+
+    def test_init_dry_run_is_complete_and_write_free(self):
+        snapshot = sorted((p.relative_to(self.project).as_posix(), p.is_dir())
+                          for p in self.project.rglob('*'))
+        preview = self.init('--dry-run', '--agents-md', '--profile', 'comprehensive')
+        self.assertTrue(preview['dry_run'])
+        self.assertIn('.harness/PROJECT.md', preview['created'])
+        self.assertIn('.harness/memory/MEMORY.md', preview['created'])
+        self.assertIn('.harness/skills/README.md', preview['created'])
+        self.assertTrue(preview['agents_md']['changed'])
+        self.assertFalse((self.project / '.harness').exists())
+        self.assertFalse((self.project / 'AGENTS.md').exists())
+        self.assertEqual(snapshot, sorted((p.relative_to(self.project).as_posix(), p.is_dir())
+                                          for p in self.project.rglob('*')))
+        actual = self.init('--agents-md', '--profile', 'comprehensive')
+        self.assertEqual(preview['created'], actual['created'])
+        self.assertEqual(preview['skipped'], actual['skipped'])
+
+    def test_init_dry_run_rejects_invalid_agents_markers_without_writes(self):
+        agents = self.project / 'AGENTS.md'
+        original = '<!-- harness-kit:start -->\nunfinished\n'
+        agents.write_text(original, encoding='utf-8')
+        result = json.loads(self.run_cli(
+            'kit/init_harness.py', '--path', self.project, '--dry-run',
+            '--agents-md', expected=2))
+        self.assertFalse(result['ok'])
+        self.assertEqual(agents.read_text(encoding='utf-8'), original)
+        self.assertFalse((self.project / '.harness').exists())
+
+    def test_git_visibility_defaults_local_preserves_exclude_and_can_share(self):
+        subprocess.run(['git', 'init', '-q', str(self.project)], check=True,
+                       env=self.env, capture_output=True)
+        exclude = self.project / '.git/info/exclude'
+        original = '# custom\n*.tmp\n'
+        exclude.write_text(original, encoding='utf-8')
+        result = self.init()
+        self.assertTrue(result['git_exclude']['repository'])
+        self.assertTrue(result['git_exclude']['changed'])
+        self.assertIn('.harness/', exclude.read_text(encoding='utf-8').splitlines())
+        self.assertTrue(exclude.read_text(encoding='utf-8').startswith(original))
+        self.assertEqual(json.loads(
+            (self.project / '.harness/HARNESS.json').read_text(encoding='utf-8')
+        )['git_visibility'], 'local')
+        ignored = subprocess.run(
+            ['git', '-C', str(self.project), 'check-ignore', '-q', '.harness/HARNESS.json'],
+            env=self.env, capture_output=True)
+        self.assertEqual(ignored.returncode, 0)
+
+        repeated = self.init()
+        self.assertFalse(repeated['git_exclude']['changed'])
+        self.assertEqual(exclude.read_text(encoding='utf-8').count('.harness/'), 1)
+
+        shared = self.init('--share-harness')
+        self.assertEqual(shared['git_visibility'], 'shared')
+        self.assertNotIn('.harness/', exclude.read_text(encoding='utf-8').splitlines())
+        self.assertEqual(json.loads(
+            (self.project / '.harness/HARNESS.json').read_text(encoding='utf-8')
+        )['git_visibility'], 'shared')
+
+    def test_doctor_reports_git_visibility_and_comprehensive_gaps(self):
+        subprocess.run(['git', 'init', '-q', str(self.project)], check=True,
+                       env=self.env, capture_output=True)
+        self.run_cli('kit/init_harness.py', '--path', self.project,
+                     '--profile', 'comprehensive', '--share-harness')
+        exclude = self.project / '.git/info/exclude'
+        exclude.write_text('.harness/\n', encoding='utf-8')
+        (self.project / '.harness/memory/MEMORY.md').unlink()
+        report = json.loads(self.run_cli(
+            'kit/doctor.py', '--path', self.project, '--json'))
+        self.assertTrue(any('共享' in warning and '忽略' in warning
+                            for warning in report['warnings']))
+        self.assertTrue(any('comprehensive' in issue for issue in report['issues']))
+
+    def test_sync_accepts_git_visibility_override_and_reports_profile(self):
+        self.init()
+        preview = json.loads(self.run_cli(
+            'kit/sync.py', '--path', self.project, '--share-harness', '--dry-run'))
+        detail = preview['details'][0]
+        self.assertEqual(detail['git_visibility'], 'shared')
+        self.assertEqual(detail['profile'], 'compact')
+        self.assertFalse((self.project / '.harness/HARNESS.json')
+                         .read_text(encoding='utf-8').count('"shared"'))
 
     def test_agents_invalid_markers_do_not_initialize_project(self):
         agents = self.project / 'AGENTS.md'

@@ -35,7 +35,7 @@ FILES = [
 
 
 def sync_one(path, dry_run=False, agents_md=False, profile='', enable_modules='',
-             disable_modules='', debt_storage=''):
+             disable_modules='', debt_storage='', git_visibility=''):
     path = os.path.normpath(os.path.abspath(path))
     wb = core.project_dir(path)
     if not os.path.isdir(wb):
@@ -45,8 +45,7 @@ def sync_one(path, dry_run=False, agents_md=False, profile='', enable_modules=''
     ptype = meta.get('type', '') or core.detect_project(path)[1] or 'generic'
     name = meta.get('project', '') or os.path.basename(path.rstrip('\\/'))
     cfg = core.get_config()
-    if agents_md:
-        core.plan_agents(path, dry_run=True)
+    entry_plan = core.agents_plan(path) if agents_md else None
     uv = core.unity_version(path)
 
     vars_ = {
@@ -114,17 +113,26 @@ def sync_one(path, dry_run=False, agents_md=False, profile='', enable_modules=''
                 f.write(core.fill(core.read_text(src), vars_))
         added.append('PROJECT.md')
 
-    snippet = os.path.join(wb, 'AGENTS.snippet.md')
-    if not os.path.exists(snippet):
-        added.append('AGENTS.snippet.md')
+    entry = None
+    if entry_plan:
+        entry = {'path': entry_plan['path'], 'changed': entry_plan['changed'],
+                 'dry_run': dry_run}
         if not dry_run:
-            with open(snippet, 'w', encoding='utf-8') as stream:
-                stream.write(core.agents_content(path))
-    entry = core.plan_agents(path, dry_run) if agents_md else None
+            core.apply_agents(entry_plan)
+
+    selected_visibility = git_visibility or meta.get('git_visibility', 'local')
+    if selected_visibility not in core.GIT_VISIBILITIES:
+        raise core.DataError('HARNESS.json 中 git_visibility 必须是 local 或 shared')
+    git_exclude = core.git_exclude_plan(path, selected_visibility)
+    if git_exclude['repository'] and git_exclude['changed'] and not dry_run:
+        os.makedirs(os.path.dirname(git_exclude['path']), exist_ok=True)
+        with open(git_exclude['path'], 'w', encoding='utf-8') as stream:
+            stream.write(git_exclude['content'])
 
     # 更新标记
     ver_changed = meta.get('kit_version') != core.KIT_VERSION
     modules_changed = meta.get('modules', {}) != module_config
+    visibility_changed = meta.get('git_visibility', 'local') != selected_visibility
     if not dry_run:
         meta.update({
             'kit_version': core.KIT_VERSION,
@@ -133,13 +141,24 @@ def sync_one(path, dry_run=False, agents_md=False, profile='', enable_modules=''
             'synced': time.strftime('%Y-%m-%d'),
             'profile': selected_profile,
             'modules': module_config,
+            'git_visibility': selected_visibility,
         })
         core.write_json(os.path.join(wb, core.HARNESS_MARK), meta)
 
     return {'ok': True, 'path': path, 'added': added, 'existing': existing,
             'enabled_modules': modules.active(module_config),
             'agents_md': entry, 'version_updated': ver_changed,
-            'modules_updated': modules_changed, 'dry_run': dry_run}
+            'modules_updated': modules_changed, 'dry_run': dry_run,
+            'profile': selected_profile,
+            'git_visibility': selected_visibility,
+            'git_visibility_updated': visibility_changed,
+            'git_exclude': {
+                'repository': git_exclude['repository'],
+                'path': git_exclude['path'],
+                'pattern': git_exclude['pattern'],
+                'changed': git_exclude['changed'],
+                'dry_run': dry_run,
+            }}
 
 
 def main(argv=None):
@@ -153,6 +172,12 @@ def main(argv=None):
     ap.add_argument('--modules', default='', help='启用模块，逗号分隔：bugs,design,adr,sessions,debt,features')
     ap.add_argument('--disable-modules', default='', help='停用模块但保留文件，逗号分隔')
     ap.add_argument('--debt-storage', choices=('list', 'entries'), help='技术债存储方式')
+    visibility = ap.add_mutually_exclusive_group()
+    visibility.add_argument('--share-harness', dest='git_visibility', action='store_const',
+                            const='shared', help='允许 .harness/ 跟随项目进入 Git')
+    visibility.add_argument('--local-only', dest='git_visibility', action='store_const',
+                            const='local', help='把 .harness/ 加入当前工作副本的本地 Git 排除')
+    ap.set_defaults(git_visibility='')
     args = ap.parse_args(argv)
 
     targets = []
@@ -176,10 +201,13 @@ def main(argv=None):
         ap.error('需要 --path 或 --root')
 
     results = [sync_one(t, args.dry_run, args.agents_md, args.profile,
-                        args.modules, args.disable_modules, args.debt_storage) for t in targets]
+                        args.modules, args.disable_modules, args.debt_storage,
+                        args.git_visibility) for t in targets]
     ok = [r for r in results if r.get('ok')]
     changed = [r for r in ok if r.get('added') or r.get('version_updated')
-               or r.get('modules_updated')]
+               or r.get('modules_updated') or r.get('git_visibility_updated')
+               or (r.get('git_exclude') or {}).get('changed')
+               or (r.get('agents_md') or {}).get('changed')]
 
     core.emit_json({
         'total': len(results),

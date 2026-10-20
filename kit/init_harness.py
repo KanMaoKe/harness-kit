@@ -1,22 +1,8 @@
 # -*- coding: utf-8 -*-
-"""在指定项目里生成一套 harness 结构。
+"""Plan and generate a project's harness structure.
 
-用法：
-    python -m kit.init_harness --path "../my-project"
-    python -m kit.init_harness --path "..." --type unity --name Duel
-    python -m kit.init_harness --path "..." --force      # 已存在时重建（谨慎）
-
-生成：
-    <path>/.harness/
-    ├── PROJECT.md           项目宪法（长期约定）
-    ├── TASKS.md             任务类型 → 上下文注入规则
-    ├── memory/              可选的长期/阶段记录
-    │   ├── MEMORY.md        长期记忆（蒸馏后）
-    │   ├── NARRATIVE.md     叙事链（讲得通的来路）
-    │   ├── CHECKPOINTS.md   检查点（每 N 轮）
-    │   └── <今天>.md         当天日志
-    ├── skills/README.md     可选的技能编写指南
-    └── HARNESS.json         标记文件
+The same plan drives dry-run output and writes. The harness is local-only by
+default when the target is inside a Git worktree; --share-harness opts out.
 """
 import argparse
 import os
@@ -36,6 +22,170 @@ def _tpl(*parts):
     return os.path.join(core.TEMPLATES_DIR, *parts)
 
 
+def _add_dir(plan, root, path):
+    if os.path.isdir(path):
+        return
+    rel = os.path.relpath(path, root).replace('\\', '/') + '/'
+    if all(item['path'] != rel for item in plan['directories']):
+        plan['directories'].append({'path': rel})
+
+
+def _add_file(plan, root, path, content, overwrite=False):
+    rel = os.path.relpath(path, root).replace('\\', '/')
+    if os.path.exists(path) and not overwrite:
+        if rel not in plan['skipped']:
+            plan['skipped'].append(rel)
+        return
+    return {'path': rel, 'content': content}
+
+
+def _add_template(plan, root, tpl_name, dest, vars_, overwrite=False):
+    source = _tpl(*tpl_name)
+    if not os.path.isfile(source):
+        return
+    entry = _add_file(plan, root, dest, core.fill(core.read_text(source), vars_), overwrite)
+    if entry:
+        plan['files'].append(entry)
+
+
+def build_plan(root, args):
+    _, detected, detected_meta = core.detect_project(root)
+    existing_meta = core.harness_meta(root)
+    ptype = args.type or existing_meta.get('type') or detected or 'generic'
+    name = args.name or existing_meta.get('project') or os.path.basename(root.rstrip('\\/')) or 'project'
+    managed_marker = os.path.isfile(os.path.join(core.project_dir(root), core.HARNESS_MARK))
+    profile = args.profile or existing_meta.get('profile', 'comprehensive' if managed_marker else 'compact')
+    if profile not in ('comprehensive', 'compact'):
+        raise core.DataError('HARNESS.json 中 profile 必须是 comprehensive 或 compact')
+    try:
+        enable_modules = modules.parse_selection(args.modules)
+        disable_modules = modules.parse_selection(args.disable_modules)
+        if set(enable_modules).intersection(disable_modules):
+            raise ValueError('同一模块不能同时启用和停用')
+        module_config = modules.update_configuration(
+            modules.configuration(existing_meta), enable_modules, disable_modules,
+            args.debt_storage)
+    except ValueError as error:
+        raise core.DataError(str(error))
+    cfg = core.get_config()
+    today = time.strftime('%Y-%m-%d')
+    uv = detected_meta.get('unity_version') or core.unity_version(root)
+    wb = core.project_dir(root)
+    vars_ = {
+        'PROJECT_NAME': name,
+        'PROJECT_PATH': root.replace('\\', '/'),
+        'DATE': today,
+        'TYPE': ptype,
+        'UNITY_VERSION': uv or '（待确认）',
+        'CHECKPOINT_INTERVAL': cfg.get('checkpoint_interval', 5),
+        'MEMORY_MAX_CHARS': cfg.get('memory_max_chars', 3000),
+        'KIT_VERSION': core.KIT_VERSION,
+        'HARNESS_DIR': os.path.basename(wb),
+    }
+
+    plan = {
+        'directories': [], 'files': [], 'skipped': [],
+        'agents_md': None, 'git_exclude': None,
+    }
+    _add_dir(plan, root, wb)
+    project_tpl = ptype if os.path.isfile(_tpl(ptype, 'PROJECT.md.tpl')) else 'generic'
+    _add_template(plan, root, (project_tpl, 'PROJECT.md.tpl'),
+                  os.path.join(wb, 'PROJECT.md'), vars_, overwrite=args.force)
+    if args.force and plan['skipped'].count('PROJECT.md'):
+        plan['skipped'].remove('PROJECT.md')
+    _add_template(plan, root, ('common', 'TASKS.md.tpl'),
+                  os.path.join(wb, 'TASKS.md'), vars_)
+    _add_template(plan, root, ('common', 'STATE.json.tpl'),
+                  os.path.join(wb, 'STATE.json'), vars_)
+
+    if profile == 'comprehensive':
+        _add_dir(plan, root, os.path.join(wb, 'memory'))
+        for filename, template in (
+                ('MEMORY.md', 'MEMORY.md.tpl'),
+                ('NARRATIVE.md', 'NARRATIVE.md.tpl'),
+                ('CHECKPOINTS.md', 'CHECKPOINTS.md.tpl')):
+            _add_template(plan, root, ('common', template),
+                          os.path.join(wb, 'memory', filename), vars_)
+        log = os.path.join(wb, 'memory', '%s.md' % today)
+        log_text = ('# %s 工作日志\n\n'
+                    '> 只追加工作事实；避免复制 STATE.json 中的当前摘要。\n\n'
+                    '- %s：harness 初始化\n' % (today, time.strftime('%H:%M')))
+        entry = _add_file(plan, root, log, log_text)
+        if entry:
+            plan['files'].append(entry)
+        _add_dir(plan, root, os.path.join(wb, 'skills'))
+        _add_template(plan, root, ('common', 'skills-README.md.tpl'),
+                      os.path.join(wb, 'skills', 'README.md'), vars_)
+
+    for rel, template in modules.file_specs(module_config):
+        dest = os.path.join(wb, rel.replace('/', os.sep))
+        _add_dir(plan, root, os.path.dirname(dest))
+        _add_template(plan, root, ('modules', template), dest, vars_)
+
+    meta = dict(existing_meta)
+    meta.update({'kit_version': core.KIT_VERSION, 'type': ptype, 'project': name,
+                 'generated_by': 'harness-kit', 'profile': profile,
+                 'modules': module_config, 'git_visibility': args.git_visibility})
+    meta.setdefault('created', today)
+    plan['files'].append({'path': os.path.relpath(
+        os.path.join(wb, core.HARNESS_MARK), root).replace('\\', '/'),
+        'content': core.json_content(meta)})
+    plan.update({'root': root, 'harness_dir': wb, 'type': ptype, 'name': name,
+                 'profile': profile, 'modules': module_config, 'meta': meta})
+    if args.agents_md:
+        plan['agents_md'] = core.agents_plan(root)
+    plan['git_exclude'] = core.git_exclude_plan(root, args.git_visibility)
+    return plan
+
+
+def apply_plan(plan):
+    for directory in plan['directories']:
+        os.makedirs(os.path.join(plan['root'], directory['path']), exist_ok=True)
+    for item in plan['files']:
+        filename = os.path.join(plan['root'], item['path'])
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(filename, 'w', encoding='utf-8') as stream:
+            stream.write(item['content'])
+    if plan['agents_md']:
+        core.apply_agents(plan['agents_md'])
+    exclude = plan['git_exclude']
+    if exclude['repository'] and exclude['changed']:
+        os.makedirs(os.path.dirname(exclude['path']), exist_ok=True)
+        with open(exclude['path'], 'w', encoding='utf-8') as stream:
+            stream.write(exclude['content'])
+
+
+def report(plan, dry_run, root, args):
+    exclude = plan['git_exclude']
+    return {
+        'agents_md': (None if not plan['agents_md'] else {
+            'path': plan['agents_md']['path'],
+            'changed': plan['agents_md']['changed'],
+            'dry_run': dry_run,
+        }),
+        'ok': True,
+        'dry_run': dry_run,
+        'path': root,
+        'harness_dir': plan['harness_dir'],
+        'type': plan['type'],
+        'name': plan['name'],
+        'profile': plan['profile'],
+        'enabled_modules': modules.active(plan['modules']),
+        'git_visibility': args.git_visibility,
+        'git_exclude': {
+            'repository': exclude['repository'],
+            'path': exclude['path'],
+            'pattern': exclude['pattern'],
+            'changed': exclude['changed'],
+            'dry_run': dry_run,
+        },
+        'created': [x['path'] for x in plan['directories']] +
+                   [x['path'] for x in plan['files']],
+        'skipped': plan['skipped'],
+        'next': '补全 PROJECT.md 中与当前项目有关的内容；可按需启用治理模块',
+    }
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description='给项目生成 harness 结构')
     ap.add_argument('--path', required=True, help='项目根目录')
@@ -50,6 +200,13 @@ def main(argv=None):
     ap.add_argument('--debt-storage', choices=('list', 'entries'),
                     help='技术债存储方式：list（默认）或 entries')
     ap.add_argument('--agents-md', action='store_true', help='创建或更新根目录 AGENTS.md 的托管片段，保留其他内容')
+    ap.add_argument('--dry-run', action='store_true', help='只输出初始化计划，不写文件')
+    visibility = ap.add_mutually_exclusive_group()
+    visibility.add_argument('--share-harness', dest='git_visibility', action='store_const',
+                            const='shared', help='允许 .harness/ 跟随项目进入 Git')
+    visibility.add_argument('--local-only', dest='git_visibility', action='store_const',
+                            const='local', help='把 .harness/ 加入当前工作副本的本地 Git 排除（默认）')
+    ap.set_defaults(git_visibility='local')
     args = ap.parse_args(argv)
 
     root = os.path.normpath(os.path.abspath(args.path))
@@ -57,137 +214,10 @@ def main(argv=None):
         core.emit_json({'ok': False, 'error': '目录不存在: %s' % root})
         return 1
 
-    _, detected, meta = core.detect_project(root)
-    existing_meta = core.harness_meta(root)
-    ptype = args.type or existing_meta.get('type') or detected or 'generic'
-    name = args.name or existing_meta.get('project') or os.path.basename(root.rstrip('\\/')) or 'project'
-    managed_marker = os.path.isfile(os.path.join(core.project_dir(root), core.HARNESS_MARK))
-    legacy_default = 'comprehensive' if managed_marker else 'compact'
-    profile = args.profile or existing_meta.get('profile', legacy_default)
-    if profile not in ('comprehensive', 'compact'):
-        core.emit_json({'ok': False, 'error': 'HARNESS.json 中 profile 必须是 comprehensive 或 compact'})
-        return 2
-    try:
-        enable_modules = modules.parse_selection(args.modules)
-        disable_modules = modules.parse_selection(args.disable_modules)
-        if set(enable_modules).intersection(disable_modules):
-            raise ValueError('同一模块不能同时启用和停用')
-        module_config = modules.update_configuration(
-            modules.configuration(existing_meta), enable_modules, disable_modules,
-            args.debt_storage)
-    except ValueError as error:
-        core.emit_json({'ok': False, 'error': str(error)})
-        return 2
-    cfg = core.get_config()
-    if args.agents_md:
-        core.plan_agents(root, dry_run=True)
-    today = time.strftime('%Y-%m-%d')
-
-    uv = meta.get('unity_version') or core.unity_version(root)
-    vars_ = {
-        'PROJECT_NAME': name,
-        'PROJECT_PATH': root.replace('\\', '/'),
-        'DATE': today,
-        'TYPE': ptype,
-        'UNITY_VERSION': uv or '（待确认）',
-        'CHECKPOINT_INTERVAL': cfg.get('checkpoint_interval', 5),
-        'MEMORY_MAX_CHARS': cfg.get('memory_max_chars', 3000),
-        'KIT_VERSION': core.KIT_VERSION,
-    }
-
-    wb = core.project_dir(root)
-    vars_['HARNESS_DIR'] = os.path.basename(wb)
-    created, skipped = [], []
-
-    def mkdir(p):
-        if not os.path.isdir(p):
-            os.makedirs(p)
-            created.append(os.path.relpath(p, root).replace('\\', '/') + '/')
-
-    def put(path, content, overwrite=True):
-        rel = os.path.relpath(path, root).replace('\\', '/')
-        if os.path.exists(path) and not overwrite:
-            skipped.append(rel)
-            return
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        created.append(rel)
-
-    def put_tpl(tpl_name, dest, overwrite=True, extra=None):
-        p = _tpl(*tpl_name)
-        if not os.path.exists(p):
-            return
-        text = core.fill(core.read_text(p), dict(vars_, **(extra or {})))
-        put(dest, text, overwrite)
-
-    mkdir(wb)
-
-    # 宪法与任务规则
-    put_tpl((ptype if os.path.isfile(_tpl(ptype, 'PROJECT.md.tpl')) else 'generic', 'PROJECT.md.tpl'),
-            os.path.join(wb, 'PROJECT.md'), overwrite=args.force)
-    put_tpl(('common', 'TASKS.md.tpl'), os.path.join(wb, 'TASKS.md'), overwrite=False)
-
-    put_tpl(('common', 'STATE.json.tpl'), os.path.join(wb, 'STATE.json'), overwrite=False)
-    put(os.path.join(wb, 'AGENTS.snippet.md'), core.agents_content(root), overwrite=False)
-
-    # The comprehensive profile retains the full project workflow; compact is opt-in.
-    if profile == 'comprehensive':
-        mkdir(os.path.join(wb, 'memory'))
-        put_tpl(('common', 'MEMORY.md.tpl'), os.path.join(wb, 'memory', 'MEMORY.md'), overwrite=False)
-        put_tpl(('common', 'NARRATIVE.md.tpl'), os.path.join(wb, 'memory', 'NARRATIVE.md'), overwrite=False)
-        put_tpl(('common', 'CHECKPOINTS.md.tpl'), os.path.join(wb, 'memory', 'CHECKPOINTS.md'), overwrite=False)
-        log = os.path.join(wb, 'memory', '%s.md' % today)
-        if not os.path.exists(log):
-            put(log, '# %s 工作日志\n\n> 只追加工作事实；避免复制 STATE.json 中的当前摘要。\n\n'
-                     '- %s：harness 初始化\n' % (today, time.strftime('%H:%M')))
-        mkdir(os.path.join(wb, 'skills'))
-        put_tpl(('common', 'skills-README.md.tpl'), os.path.join(wb, 'skills', 'README.md'), overwrite=False)
-
-    # Optional governance modules are additive and never overwrite project files.
-    for rel, template in modules.file_specs(module_config):
-        dest = os.path.join(wb, rel.replace('/', os.sep))
-        mkdir(os.path.dirname(dest))
-        put_tpl(('modules', template), dest, overwrite=False)
-
-    # Preserve existing metadata, including the original creation date.
-    meta = core.harness_meta(root)
-    meta.update({'kit_version': core.KIT_VERSION, 'type': ptype,
-                 'project': name, 'generated_by': 'harness-kit', 'profile': profile,
-                 'modules': module_config})
-    meta.setdefault('created', today)
-    core.write_json(os.path.join(wb, core.HARNESS_MARK), meta)
-    created.append(os.path.relpath(os.path.join(wb, core.HARNESS_MARK), root).replace('\\', '/'))
-
-    # gitignore 提示
-    gi = os.path.join(root, '.gitignore')
-    gi_hint = ''
-    if os.path.exists(gi):
-        txt = ''
-        try:
-            txt = open(gi, encoding='utf-8', errors='ignore').read()
-        except Exception:
-            pass
-        if os.path.basename(wb) + '/memory/' in txt:
-            gi_hint = 'memory/ 已忽略；请确认这符合项目的共享策略'
-        else:
-            gi_hint = ('建议在 .gitignore 加一行 `%s/memory/`' % os.path.basename(wb) +
-                       '（仅当记忆不适合与团队共享时添加；按项目策略决定各文件是否入库）')
-
-    entry = core.plan_agents(root) if args.agents_md else None
-    core.emit_json({
-        'agents_md': entry,
-        'ok': True,
-        'path': root,
-        'harness_dir': wb,
-        'type': ptype,
-        'name': name,
-        'profile': profile,
-        'enabled_modules': modules.active(module_config),
-        'created': created,
-        'skipped': skipped,
-        'gitignore_hint': gi_hint,
-        'next': '补全 PROJECT.md 中与当前项目有关的内容；可按需启用治理模块',
-    })
+    plan = build_plan(root, args)
+    if not args.dry_run:
+        apply_plan(plan)
+    core.emit_json(report(plan, args.dry_run, root, args))
     return 0
 
 

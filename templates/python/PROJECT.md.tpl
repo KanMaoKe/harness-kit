@@ -73,7 +73,8 @@
 
 核心文件：`PROJECT.md`、`TASKS.md`、`STATE.json`、`HARNESS.json`。完整档还包含 `memory/` 与 `skills/`；精简档会省略这两个扩展目录。
 
-文件是否入库由项目的隐私和协作需求决定。
+默认由 harness-kit 在 Git 工作副本的 `.git/info/exclude` 中保持本地私有；只有显式共享时才随项目入库。
+```text
 {{HARNESS_DIR}}/
 ├── PROJECT.md / TASKS.md     长期约定与任务规则（建议入库）
 ├── memory/                   记忆层（建议不入库）

@@ -25,6 +25,7 @@ else:
 def build_context(cwd, kind, extra, state, python_exe):
     init_cmd = '"%s" "%s" --path "%s"' % (
         python_exe, os.path.join(core.ROOT_DIR, 'kit', 'init_harness.py'), cwd)
+    init_cmd += ' --profile comprehensive'
     mute_cmd = '"%s" "%s" --path "%s"' % (
         python_exe, os.path.join(core.ROOT_DIR, 'kit', 'mute.py'), cwd)
 
@@ -44,7 +45,7 @@ def build_context(cwd, kind, extra, state, python_exe):
         '\n'
         '在不打断当前任务的前提下，使用宿主的提问工具询问用户是否要建 harness，'
         '选项固定为三个：\n'
-        '  1. 现在生成完整 harness（推荐）\n'
+        '  1. 现在生成完整 harness（推荐；含可选记忆与技能文档）\n'
         '  2. 先不用，这次别问了\n'
         '  3. 这个项目以后都不用问\n'
         '提问时用一句话说明：会在 `{harness_dir}/` 下生成 PROJECT.md（项目背景与约定）、'

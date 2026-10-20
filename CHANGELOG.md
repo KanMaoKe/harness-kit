@@ -2,6 +2,11 @@
 
 ## 未发布
 
+- 初始化新增 `--dry-run`，预览和执行共用同一份生成计划；首次接入与已初始化项目的预览入口分开。
+- `.harness/` 默认作为本机协作上下文，在 Git 工作副本中写入 `.git/info/exclude`；新增 `--share-harness` 与 `--local-only`。
+- 移除默认生成的 `AGENTS.snippet.md`；项目入口统一为 `--agents-md` 维护的根 `AGENTS.md`。
+- `HARNESS.json` 记录 `git_visibility`；`doctor` 检查 Git 归属、comprehensive 派生文件与档案有效性。
+- 工具版本升级为 2.5。
 - 任务协作模板新增「设计与实现原则」：SSOT、单一职责、YAGNI / Rule of Three、冲突裁决与按结构取舍；模板已覆盖的原则不重复写入。
 - 默认初始化改为 compact 精简核心；comprehensive 显式启用。
 - 新增可选设计、ADR、Bug、Session、技术债与 Feature 模块；Bug 固定条目式，技术债支持清单或条目式。
