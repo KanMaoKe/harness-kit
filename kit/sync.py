@@ -35,13 +35,19 @@ FILES = [
 
 
 def sync_one(path, dry_run=False, agents_md=False, profile='', enable_modules='',
-             disable_modules='', debt_storage='', git_visibility=''):
+             disable_modules='', debt_storage='', git_visibility='',
+             require_identity=False, register=False):
     path = os.path.normpath(os.path.abspath(path))
     wb = core.project_dir(path)
     if not os.path.isdir(wb):
         return {'ok': False, 'path': path, 'error': '没有 harness 目录，请先用 init_harness 生成'}
 
     meta = core.harness_meta(path)
+    if require_identity:
+        identity = core.project_identity(path)
+        if not identity['consistent']:
+            return {'ok': False, 'path': path, 'error': identity['error'],
+                    'skipped': 'identity_mismatch'}
     ptype = meta.get('type', '') or core.detect_project(path)[1] or 'generic'
     name = meta.get('project', '') or os.path.basename(path.rstrip('\\/'))
     cfg = core.get_config()
@@ -144,6 +150,9 @@ def sync_one(path, dry_run=False, agents_md=False, profile='', enable_modules=''
             'git_visibility': selected_visibility,
         })
         core.write_json(os.path.join(wb, core.HARNESS_MARK), meta)
+        if register:
+            core.register_project(path)
+            core.mark_project_synced(path)
 
     return {'ok': True, 'path': path, 'added': added, 'existing': existing,
             'enabled_modules': modules.active(module_config),
@@ -165,6 +174,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description='补齐 / 升级 harness 结构')
     ap.add_argument('--path', help='单个项目路径')
     ap.add_argument('--root', help='批量：根目录')
+    ap.add_argument('--registered', action='store_true',
+                    help='同步本机登记表中的项目，支持 --dry-run 预览')
     ap.add_argument('--depth', type=int, default=1)
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--agents-md', action='store_true', help='创建或更新根目录 AGENTS.md 托管片段')
@@ -181,7 +192,12 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     targets = []
-    if args.path:
+    selected = [bool(args.path), bool(args.root), args.registered]
+    if sum(selected) != 1:
+        ap.error('--path、--root、--registered 必须且只能选择一个')
+    if args.registered:
+        targets = [entry['path'] for entry in core.registered_projects()]
+    elif args.path:
         targets = [args.path]
     elif args.root:
         root = os.path.normpath(os.path.abspath(args.root))
@@ -197,12 +213,10 @@ def main(argv=None):
                 p = os.path.join(cur, x)
                 if os.path.isdir(core.project_dir(p)):
                     targets.append(p)
-    else:
-        ap.error('需要 --path 或 --root')
-
     results = [sync_one(t, args.dry_run, args.agents_md, args.profile,
                         args.modules, args.disable_modules, args.debt_storage,
-                        args.git_visibility) for t in targets]
+                        args.git_visibility, require_identity=args.registered,
+                        register=not args.dry_run) for t in targets]
     ok = [r for r in results if r.get('ok')]
     changed = [r for r in ok if r.get('added') or r.get('version_updated')
                or r.get('modules_updated') or r.get('git_visibility_updated')
@@ -213,6 +227,7 @@ def main(argv=None):
         'total': len(results),
         'synced': len(ok),
         'changed': len(changed),
+        'registered': args.registered,
         'details': results,
     })
     return 0 if len(ok) == len(results) else 1

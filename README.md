@@ -9,10 +9,11 @@
 | 功能 | 行为 |
 |---|---|
 | 初始化 | 先预览或直接生成项目规则、任务协作说明和状态文件；完整档另含记忆与技能指南；默认不进入 Git |
-| 体检 | 检查核心文件、任务状态、待补栏目、可选记忆、Git 归属、档案完整性和版本 |
+| 存档与恢复 | 在关键节点保存当前任务；换会话或客户端后从同一份状态继续 |
+| 体检 | 检查核心文件、项目身份、入口、任务状态、Git 归属和档案完整性 |
 | 总览 | 扫描多个项目，列出类型、harness 状态及检查问题数 |
-| 同步 | 补缺件、更新版本标记，保留已有正文 |
-| 可选宿主接入 | 将技能安装到指定目录，或显式注册会话 hook |
+| 同步 | 补缺件、更新版本标记，保留已有正文；支持本机登记项目批量同步 |
+| 可选技能接入 | 将技能安装到指定目录，供支持的 AI 客户端使用 |
 
 这是文件层的脚手架。检查点记录、记忆蒸馏、任务上下文选择和技能执行由用户或 AI 完成；未内置模型调用、BM25 / 向量检索、每轮自动注入或验收重试。体检报告只列出可检查的问题，不给项目质量打分。
 
@@ -81,11 +82,14 @@ python kit/init_harness.py --path "../my-project" --agents-md
 ### 恢复当前任务
 
 ```bash
+python kit/checkpoint.py --path "../my-project" --status in_progress --next-step "运行测试"
 python kit/resume.py --path "../my-project"
 python kit/resume.py --path "../my-project" --json
 ```
 
-`resume` 只读取状态并指出优先读取的项目文件，不调用模型或自动执行下一步。旧项目先运行 `sync` 补齐状态文件；已有状态正文不会覆盖。
+`checkpoint` 在开始、完成重要步骤、验证、阻塞或交接时保存当前任务。它不自动监听或总结对话，也不替代 AI 与客户端已有的记忆能力。可用 `--goal`、`--acceptance`、`--verification`、`--blockers` 更新对应字段；数组选项可重复，提供后替换旧数组。`--dry-run` 只预览，不写文件。
+
+`resume` 只读取同一份状态并指出优先读取的项目文件，不调用模型或自动执行下一步。换客户端时先恢复，不必重新生成项目调研。突然中断且从未存档的对话细节无法由工具凭空恢复。
 
 `STATE.json` 使用以下结构（示例）：
 
@@ -126,25 +130,19 @@ python install.py --in-place
 
 | 选项 | 行为 |
 |---|---|
-| `--in-place` | 直接使用当前仓库，移动仓库后需重新安装技能或 hook |
+| `--in-place` | 直接使用当前仓库，移动仓库后需重新安装技能 |
 | 不带位置选项 | 将代码复制到 `~/.harness-kit/code/` |
 | `--to "<工具安装目录>"` | 复制代码、模板、文档和技能源文件到指定目录 |
 | `--skill-dir "<技能父目录>"` | 安装 `harness-init/`，写入实际代码路径 |
-| `--host-config-dir "<宿主配置目录>"` | 技能安装到其 `skills/harness-init/`；仅凭此选项不注册 hook |
-| `--with-hook` | 显式注册 hook，需要指定宿主配置目录且已有 `settings.json` |
-| `--no-hook` | 兼容旧参数，默认行为就是不注册 hook |
+| `--host-config-dir "<宿主配置目录>"` | 技能安装到其 `skills/harness-init/` |
 
-例如，将技能安装到你使用的 AI 客户端，或接入符合下述 hook 协议的宿主：
+例如，将技能安装到你使用的 AI 客户端：
 
 ```bash
 python install.py --in-place --host-config-dir "<宿主配置目录>"
-# 如确实需要会话提示，再显式注册
-python install.py --in-place --host-config-dir "<宿主配置目录>" --with-hook
 ```
 
-hook 适配 `SessionStart` / `startup`、JSON 输入的 `cwd` 与 `session_id`，以及 `hookSpecificOutput.additionalContext` 输出。其他宿主需要适配事件和配置格式，不能只因支持 hooks 就认为兼容。
-
-注册前会备份配置并保留其他字段。注册后完全退出并重开宿主，验证是否生效。**即使注册 hook，开场提示默认仍关闭**；需要提示时，手动把运行配置 `enabled` 改为 `true`。提示指令要求优先执行已有明确任务，不打断用户。
+初始化询问 hook 和静音功能已移除。需要清理旧注册时，卸载流程会调用保留的 `install_hook.py --remove`；新版不提供 hook 注册。
 
 技能安装后的工具路径与运行状态目录分别维护，移动代码后重新安装即可。手动复制技能时，请将 `SKILL.md` 中的 `{{KIT_PATH}}` 替换为实际代码目录。
 
@@ -154,7 +152,20 @@ hook 适配 `SessionStart` / `startup`、JSON 输入的 `cwd` 与 `session_id`�
 python install.py --uninstall
 ```
 
-移除安装记录中的 hook，保留代码、技能、配置和项目文件供手动清理。也可用 `--host-config-dir` 明确指定需移除 hook 的宿主目录。安装与卸载不再自动递归清理旧工具目录。
+移除安装记录中的旧 hook，保留代码、技能、配置和项目文件供手动清理。也可用 `--host-config-dir` 明确指定宿主目录；没有旧 hook 时不会伪报已移除。
+
+### 本机项目登记与同步
+
+初始化成功后会在 `~/.harness-kit/projects.json` 登记项目路径；登记表只在当前机器，不包含项目正文，也不进入项目仓库。
+
+```bash
+python kit/sync.py --registered --dry-run
+python kit/sync.py --registered
+```
+
+先预览所有已登记项目的补缺和升级，再确认同步。保留各项目的正文、档位、模块和 Git 归属。项目身份与 `PROJECT.md` 不一致时跳过该项目，其他项目继续，避免把错误元数据继续扩散。dry-run 不写项目文件、Git 配置或登记表。
+
+同步文件不等于正在进行的 AI 对话已经重新读取；新会话通过 `AGENTS.md` 或 `resume` 获取最新状态。
 
 ## 命令
 
@@ -169,6 +180,7 @@ python install.py --uninstall
 | `python kit/init_harness.py --path "<项目>" --modules bugs,adr,debt` | 启用指定可选模块 |
 | `python kit/init_harness.py --path "<项目>" --modules debt --debt-storage entries` | 技术债使用条目式目录 |
 | `python kit/resume.py --path "<项目>" --json` | 读取任务恢复摘要；省略 `--json` 输出可读报告 |
+| `python kit/checkpoint.py --path "<项目>" --status in_progress --next-step "测试"` | 保存当前任务检查点，可加 `--dry-run` |
 | `python kit/doctor.py --path "<项目>" --json` | 体检 JSON；省略 `--json` 输出可读报告 |
 | `python kit/status.py --root "<父目录>" --depth 1` | 总览直接子项目，可加 `--json` |
 | `python kit/sync.py --path "<项目>" --dry-run` | 按项目记录的档位预览补齐；省略 `--dry-run` 执行 |
@@ -176,13 +188,12 @@ python install.py --uninstall
 | `python kit/sync.py --path "<项目>" --modules bugs,adr` | 启用模块并仅补齐缺失模板 |
 | `python kit/sync.py --path "<项目>" --disable-modules bugs` | 停用模块配置，不删除已有文件 |
 | `python kit/sync.py --root "<父目录>" --depth 1` | 批量补齐已有 harness 的子项目 |
-| `python kit/mute.py --path "<目录>"` | 静音；加 `--unmute` 解除 |
-| `python kit/mute.py --list` | 查看静音名单 |
-| `python kit/install_hook.py --settings "<settings.json>"` | 注册 hook；加 `--remove` 移除 |
+| `python kit/sync.py --registered --dry-run` | 预览所有本机登记项目；省略 `--dry-run` 执行 |
+| `python kit/install_hook.py --settings "<settings.json>" --remove` | 清理旧初始化询问 hook，不支持注册 |
 
-`init_harness` 和 `sync` 输出 JSON。配置损坏、JSON 顶层类型错误、配置字段非法或文件读写失败时，命令行输出 `ok: false` 与错误位置，退出码为 2；hook 则在 stderr 报错，stdout 保持为空。不存在的配置使用默认值，现有损坏配置不会静默重置。
+`init_harness`、`checkpoint` 和 `sync` 输出 JSON。配置损坏、JSON 顶层类型错误、配置字段非法或文件读写失败时，命令行输出 `ok: false` 与错误位置，退出码为 2。不存在的配置使用默认值，现有损坏配置不会静默重置。
 
-`doctor` 默认保留报告模式，发现结构问题或警告仍返回 0；CI 可用 `--strict`，此时发现问题或警告返回 1。`structure_complete` 表示必需文件齐全，与仅表示已有初始化标记的 `state: full` 分开。默认本地私有的 harness 在 Git 中实际未被忽略，或显式共享的 harness 被忽略时，会报告不一致。`sync` 单个或批量目标失败时返回 1，数据读取异常返回 2。
+`doctor` 默认保留报告模式，发现结构问题或警告仍返回 0；CI 可用 `--strict`，此时发现问题或警告返回 1。`structure_complete` 表示必需文件齐全，与仅表示已有初始化标记的 `state: full` 分开。项目身份不一致是问题；旧任务、空验证和 Git 归属不一致会提示或警告。`sync` 单个或批量目标失败时返回 1，数据读取异常返回 2。
 
 ## 配置
 
@@ -190,9 +201,6 @@ python install.py --uninstall
 
 ```json
 {
-  "enabled": false,
-  "notify_scope": "project-only",
-  "once_per_session": true,
   "checkpoint_interval": 5,
   "memory_max_chars": 3000
 }
@@ -200,9 +208,6 @@ python install.py --uninstall
 
 | 字段 | 说明 |
 |---|---|
-| `enabled` | hook 提示开关，不影响命令行 |
-| `notify_scope` | `project-only` 只提示识别出的项目；`always` 包含普通目录 |
-| `once_per_session` | 按 session ID 去重；缺少 ID 时不提示，避免跨会话误判 |
 | `checkpoint_interval` | 写入新模板的检查点轮次约定，不自动计数 |
 | `memory_max_chars` | 新模板的记忆长度建议及体检阈值 |
 
@@ -210,13 +215,12 @@ python install.py --uninstall
 |---|---|
 | `HARNESS_KIT_HOME` | 覆盖运行状态目录，也改变默认代码复制目标的父目录 |
 | `HARNESS_HOST_CONFIG_DIR` | 显式宿主配置目录，命令行位置参数优先 |
-| `HARNESS_KIT_SETTINGS` | 单独注册工具的配置文件路径，`--settings` 优先；安装器不读取 |
 
 安装器会保留已有运行配置。更改配置不会自动改写已生成的项目文件。
 
 ## 开发与验证
 
-`kit/` 为命令行与 hook 实现，`templates/` 为项目类型及通用模板，`skill/` 为技能源文件，`tests/` 为行为回归测试。
+`kit/` 为命令行与旧 hook 清理实现，`templates/` 为项目类型及通用模板，`skill/` 为技能源文件，`tests/` 为行为回归测试。
 
 ```bash
 python -m unittest discover -s tests -v

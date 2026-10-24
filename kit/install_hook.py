@@ -1,15 +1,4 @@
-# -*- coding: utf-8 -*-
-"""把 harness-kit 的 SessionStart hook 注册进宿主的 settings.json。
-
-用法：
-    python -m kit.install_hook                 # 安装
-    python -m kit.install_hook --remove        # 卸载
-    python -m kit.install_hook --settings <路径>   # 指定配置文件
-
-会自动备份原文件为 settings.json.bak-<时间戳>。
-
-⚠️ hook 配置在宿主启动时快照，改完必须**完全退出并重开**才生效。
-"""
+"""Remove legacy initialization-prompt hooks; registration is no longer offered."""
 import argparse
 import json
 import os
@@ -25,112 +14,67 @@ else:
     from . import core
 
 
-def settings_path():
-    env = os.environ.get('HARNESS_KIT_SETTINGS')
-    if env:
-        return os.path.abspath(os.path.expanduser(env))
-    base = core.host_config_dir()
-    if not base:
-        raise ValueError('请指定 --settings、HARNESS_KIT_SETTINGS 或 HARNESS_HOST_CONFIG_DIR')
-    return os.path.join(base, 'settings.json')
+def is_legacy_hook(hook, legacy_paths=()):
+    command = hook.get('command', '') if isinstance(hook, dict) else ''
+    candidates = [os.path.join(core.ROOT_DIR, 'kit', 'hook_session_start.py')]
+    candidates.extend(legacy_paths)
+    expected = {os.path.normcase(os.path.abspath(path)) for path in candidates}
+    for value in re.findall(r'"([^"\n]+)"', command):
+        if os.path.normcase(os.path.abspath(value)) in expected:
+            return True
+    return False
 
 
-def hook_command():
-    script = os.path.join(core.ROOT_DIR, 'kit', 'hook_session_start.py').replace('\\', '/')
-    return '"%s" "%s"' % (core.python_executable().replace('\\', '/'), script)
-
-
-def entry():
-    return {
-        'matcher': 'startup',
-        'hooks': [{'type': 'command', 'command': hook_command(), 'timeout': 15}],
-    }
-
-
-def is_ours_hook(hook):
-    script = os.path.normcase(os.path.abspath(os.path.join(core.ROOT_DIR, 'kit', 'hook_session_start.py')))
-    # Generated commands quote both paths. Match the actual script, not a shared filename.
-    return any(os.path.normcase(os.path.abspath(value)) == script
-               for value in re.findall(r'"([^"\n]+)"', hook.get('command', '')))
-
-
-def is_ours(entry):
-    return any(is_ours_hook(hook) for hook in entry.get('hooks', []))
-
-
-def without_ours(entries):
-    result = []
-    for item in entries:
-        if not is_ours(item):
-            result.append(item)
-            continue
-        remaining = [hook for hook in item.get('hooks', []) if not is_ours_hook(hook)]
+def remove_legacy(settings, legacy_paths=()):
+    data = core.read_json(settings)
+    hooks = data.get('hooks', {})
+    if not isinstance(hooks, dict):
+        raise core.DataError('%s: hooks 必须是对象' % settings)
+    entries = hooks.get('SessionStart', [])
+    if not isinstance(entries, list):
+        raise core.DataError('%s: hooks.SessionStart 必须是数组' % settings)
+    kept = []
+    removed = 0
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get('hooks', []), list):
+            raise core.DataError('%s: SessionStart 条目必须包含 hooks 数组' % settings)
+        remaining = [hook for hook in entry.get('hooks', [])
+                     if not is_legacy_hook(hook, legacy_paths)]
+        removed += len(entry.get('hooks', [])) - len(remaining)
         if remaining:
-            updated = dict(item)
+            updated = dict(entry)
             updated['hooks'] = remaining
-            result.append(updated)
-    return result
-
-
-def backup(p):
-    dst = '%s.bak-%s' % (p, time.strftime('%Y%m%d-%H%M%S'))
-    shutil.copy2(p, dst)
-    return dst
-
-
-def main(argv=None):
-    ap = argparse.ArgumentParser(description='安装 / 卸载 harness-kit 的 SessionStart hook')
-    ap.add_argument('--remove', action='store_true')
-    ap.add_argument('--settings', default='', help='settings.json 路径（默认自动探测）')
-    args = ap.parse_args(argv)
-
-    try:
-        path = args.settings or settings_path()
-    except ValueError as error:
-        core.plain(str(error))
-        return 1
-    if not os.path.exists(path):
-        core.plain('找不到配置文件：%s\n（宿主还没生成过 settings.json？先启动一次）' % path)
-        return 1
-
-    data = json.load(open(path, encoding='utf-8'))
-
-    if args.remove:
-        hooks = data.get('hooks', {})
-        ss = hooks.get('SessionStart', [])
-        kept = without_ours(ss)
-        removed = sum(is_ours_hook(h) for e in ss for h in e.get('hooks', []))
+            kept.append(updated)
+        elif not entry.get('hooks'):
+            kept.append(entry)
+    if removed:
         if kept:
             hooks['SessionStart'] = kept
         else:
             hooks.pop('SessionStart', None)
         if not hooks:
             data.pop('hooks', None)
-        bk = backup(path)
-        json.dump(data, open(path, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
-        core.plain('已卸载 %d 条 harness-kit hook\n备份：%s' % (removed, bk))
-        core.plain('⚠️ 需要完全退出并重开宿主才生效')
-        return 0
+        backup = '%s.bak-%s' % (settings, time.strftime('%Y%m%d-%H%M%S'))
+        shutil.copy2(settings, backup)
+        with open(settings, 'w', encoding='utf-8') as stream:
+            json.dump(data, stream, ensure_ascii=False, indent=2)
+    return removed
 
-    hooks = data.setdefault('hooks', {})
-    ss = hooks.setdefault('SessionStart', [])
-    ss[:] = without_ours(ss)
-    ss.append(entry())
 
-    bk = backup(path)
-    json.dump(data, open(path, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
-
-    check = json.load(open(path, encoding='utf-8'))
-    assert 'hooks' in check, '写入失败'
-    assert any(is_ours(e) for e in check['hooks']['SessionStart']), 'hook 未写入'
-
-    core.plain('已安装 SessionStart hook\n'
-               '配置文件：%s\n'
-               '备份：%s\n'
-               '触发命令：\n  %s\n'
-               '\n原有顶层字段保留：%s\n'
-               '⚠️ 需要完全退出并重开宿主才生效（hook 配置在启动时快照）'
-               % (path, bk, hook_command(), ', '.join(check.keys())))
+def main(argv=None):
+    parser = argparse.ArgumentParser(description='移除旧版 harness-kit 初始化询问 hook')
+    parser.add_argument('--remove', action='store_true', help='执行清理')
+    parser.add_argument('--settings', required=True, help='宿主 settings.json 路径')
+    parser.add_argument('--legacy-script', action='append', default=[],
+                        help='安装器提供的历史 hook_session_start.py 路径，可重复')
+    args = parser.parse_args(argv)
+    if not args.remove:
+        parser.error('新版不再注册询问 hook；如需清理旧配置，请使用 --remove')
+    if not os.path.isfile(args.settings):
+        raise core.DataError('找不到配置文件：%s' % args.settings)
+    removed = remove_legacy(os.path.abspath(args.settings), args.legacy_script)
+    core.emit_json({'ok': True, 'removed': removed,
+                    'message': '已清理旧 hook；其他宿主配置保留' if removed else '没有需要清理的旧 hook'})
     return 0
 
 

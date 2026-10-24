@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""harness-kit 核心逻辑：路径解析、项目检测、harness 状态判断、配置与静音名单。
+"""harness-kit 核心逻辑：路径、项目检测、状态与本地项目登记。
 
 所有路径都是动态解析的，没有任何硬编码，clone 下来即可用。
 """
 import json
+import datetime
 import os
 import re
 import subprocess
@@ -11,7 +12,7 @@ import sys
 
 # ---- 路径解析 ----------------------------------------------------------------
 
-KIT_VERSION = '2.5'
+KIT_VERSION = '2.6'
 
 # 代码与模板所在目录（本文件在 <root>/kit/ 下）
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -46,8 +47,8 @@ def config_path():
     return os.path.join(runtime_home(), 'config.json')
 
 
-def muted_path():
-    return os.path.join(runtime_home(), 'muted.json')
+def registry_path():
+    return os.path.join(runtime_home(), 'projects.json')
 
 
 # ---- 基础工具 ----------------------------------------------------------------
@@ -73,18 +74,11 @@ def read_json(path, default=None):
     return value
 
 
-def run_cli(main, hook=False):
+def run_cli(main):
     try:
         return main() or 0
     except (DataError, OSError) as error:
-        if hook:
-            try:
-                sys.stderr.reconfigure(encoding='utf-8')
-            except AttributeError:
-                pass
-            sys.stderr.write('[harness-kit] %s\n' % error)
-        else:
-            emit_json({'ok': False, 'error': str(error)})
+        emit_json({'ok': False, 'error': str(error)})
         return 2
 
 
@@ -101,9 +95,6 @@ def json_content(data):
 
 
 DEFAULT_CONFIG = {
-    'enabled': False,          # hook 总开关
-    'notify_scope': 'project-only',  # always | project-only
-    'once_per_session': True,
     'checkpoint_interval': 5,  # 每 N 轮一个检查点（写进生成的规范里）
     'memory_max_chars': 3000,  # MEMORY.md 建议上限，超过就该蒸馏
 }
@@ -112,11 +103,6 @@ DEFAULT_CONFIG = {
 def get_config():
     cfg = dict(DEFAULT_CONFIG)
     cfg.update(read_json(config_path(), {}))
-    for name in ('enabled', 'once_per_session'):
-        if type(cfg[name]) is not bool:
-            raise DataError('%s: %s 必须是布尔值' % (config_path(), name))
-    if cfg['notify_scope'] not in ('always', 'project-only'):
-        raise DataError('%s: notify_scope 必须是 always 或 project-only' % config_path())
     for name in ('checkpoint_interval', 'memory_max_chars'):
         if type(cfg[name]) is not int or cfg[name] <= 0:
             raise DataError('%s: %s 必须是正整数' % (config_path(), name))
@@ -216,6 +202,82 @@ def harness_state(path):
 def harness_meta(path):
     """读项目的 harness 标记，返回 dict（无则空）"""
     return read_json(os.path.join(project_dir(path), HARNESS_MARK), {})
+
+
+def today():
+    return datetime.date.today().isoformat()
+
+
+def _norm(path):
+    return os.path.normcase(os.path.normpath(os.path.abspath(path)))
+
+
+def registered_projects():
+    value = read_json(registry_path(), {'projects': []})
+    entries = value.get('projects', [])
+    if not isinstance(entries, list):
+        raise DataError('%s: projects 必须是数组' % registry_path())
+    result = []
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get('path'), str):
+            raise DataError('%s: 每个项目必须包含字符串 path' % registry_path())
+        result.append(entry)
+    return result
+
+
+def register_project(path):
+    """Record a local project, never its project files or task content."""
+    filename = registry_path()
+    root = os.path.normpath(os.path.abspath(path))
+    entries = registered_projects()
+    for entry in entries:
+        if _norm(entry['path']) == _norm(root):
+            entry['path'] = root
+            entry['harness_dir'] = os.path.basename(project_dir(root))
+            entry.setdefault('registered', today())
+            break
+    else:
+        entries.append({'path': root, 'harness_dir': os.path.basename(project_dir(root)),
+                        'registered': today()})
+    write_json(filename, {'projects': entries})
+    return filename
+
+
+def mark_project_synced(path):
+    filename = registry_path()
+    entries = registered_projects()
+    key = _norm(path)
+    for entry in entries:
+        if _norm(entry['path']) == key:
+            entry['last_synced'] = today()
+    write_json(filename, {'projects': entries})
+
+
+def project_identity(path):
+    """Compare the human project heading with metadata without rewriting it."""
+    meta = harness_meta(path)
+    filename = os.path.join(project_dir(path), 'PROJECT.md')
+    declared = meta.get('project', '')
+    if not isinstance(declared, str) or not declared.strip():
+        return {'consistent': False, 'declared': declared, 'documented': '',
+                'unmanaged': True,
+                'error': 'HARNESS.json 缺少字符串 project'}
+    if not os.path.isfile(filename):
+        return {'consistent': False, 'declared': declared, 'documented': '',
+                'unmanaged': True,
+                'error': '缺少 PROJECT.md，无法核对项目身份'}
+    first = read_text(filename).splitlines()[0].strip()
+    documented = first[2:].strip() if first.startswith('# ') else ''
+    for suffix in (' · 项目宪法', ' · 项目约定'):
+        if documented.endswith(suffix):
+            documented = documented[:-len(suffix)].strip()
+            break
+    consistent = bool(documented) and documented == declared.strip()
+    return {'consistent': consistent, 'declared': declared,
+            'documented': documented,
+            'unmanaged': not bool(documented),
+            'error': '' if consistent else '项目身份不一致：HARNESS.json 为 %s，PROJECT.md 为 %s'
+            % (declared, documented or '未识别标题')}
 
 
 GIT_VISIBILITIES = ('local', 'shared')
@@ -342,57 +404,6 @@ def git_visibility_status(path):
             'exclude_path': context['exclude_path'], 'pattern': context['pattern']}
 
 
-# ---- 静音名单 ----------------------------------------------------------------
-
-def _norm(p):
-    return os.path.normcase(os.path.normpath(os.path.abspath(p)))
-
-
-def is_muted(path):
-    muted = read_json(muted_path(), {'paths': []})
-    key = _norm(path)
-    return any(_norm(p) == key for p in muted.get('paths', []))
-
-
-def mute(path):
-    p = muted_path()
-    muted = read_json(p, {'paths': []})
-    key = _norm(path)
-    if not any(_norm(x) == key for x in muted.get('paths', [])):
-        muted.setdefault('paths', []).append(os.path.abspath(path))
-        write_json(p, muted)
-    return p
-
-
-def unmute(path):
-    p = muted_path()
-    muted = read_json(p, {'paths': []})
-    key = _norm(path)
-    before = len(muted.get('paths', []))
-    muted['paths'] = [x for x in muted.get('paths', []) if _norm(x) != key]
-    write_json(p, muted)
-    return before - len(muted['paths'])
-
-
-# ---- hook 输入输出 ------------------------------------------------------------
-
-def read_stdin_json():
-    try:
-        raw = sys.stdin.read()
-        return json.loads(raw) if raw.strip() else {}
-    except Exception:
-        return {}
-
-
-def emit(obj):
-    """向 stdout 输出 hook JSON（UTF-8 安全）"""
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-    except Exception:
-        pass
-    sys.stdout.write(json.dumps(obj, ensure_ascii=False))
-
-
 def emit_json(obj):
     """向 stdout 输出普通 JSON（给命令行工具用）"""
     try:
@@ -429,11 +440,7 @@ def read_text(path):
 STATE_STATUSES = ('not_started', 'in_progress', 'blocked', 'completed')
 
 
-def task_state(path):
-    filename = os.path.join(project_dir(path), 'STATE.json')
-    if not os.path.isfile(filename):
-        raise DataError('%s: 缺少任务状态，请运行 sync 补齐' % filename)
-    value = read_json(filename)
+def task_state_data(value, filename):
     if value.get('status') not in STATE_STATUSES:
         raise DataError('%s: status 必须是 %s' % (filename, ', '.join(STATE_STATUSES)))
     for name in ('goal', 'next_step', 'updated'):
@@ -443,6 +450,13 @@ def task_state(path):
         if not isinstance(value.get(name), list) or not all(isinstance(item, str) for item in value[name]):
             raise DataError('%s: %s 必须是字符串数组' % (filename, name))
     return value
+
+
+def task_state(path):
+    filename = os.path.join(project_dir(path), 'STATE.json')
+    if not os.path.isfile(filename):
+        raise DataError('%s: 缺少任务状态，请运行 sync 补齐' % filename)
+    return task_state_data(read_json(filename), filename)
 
 
 AGENTS_START = '<!-- harness-kit:start -->'
@@ -455,6 +469,7 @@ def agents_content(path, existing=''):
              '- 先读取 `%s/PROJECT.md` 和 `%s/TASKS.md`，遵守已有项目指令。\n'
              '- 从 `%s/STATE.json` 恢复当前目标、下一步、阻塞与验收状态。\n'
              '- 只按任务需要读取相关文档和技能；可选记忆目录不要求存在。\n'
+             '- 开始、完成重要步骤、验证、阻塞或交接时，用 checkpoint 保存当前任务；不要只凭记忆继续。\n'
              '- 阶段结束时更新 STATE.json 中的验证结果和下一步；未验证不标记完成。\n'
              '%s\n' % (AGENTS_START, folder, folder, folder, AGENTS_END))
     if AGENTS_START not in existing and AGENTS_END not in existing:

@@ -8,6 +8,7 @@
 检查核心文件、任务状态、待补栏目、可选记忆长度及版本。
 """
 import argparse
+import datetime
 import os
 import re
 import sys
@@ -61,6 +62,18 @@ def check(path):
                 result['notes'].append('STATE.json 尚未填写当前目标')
             if state['status'] == 'completed' and (not state['acceptance'] or not state['verification']):
                 result['warnings'].append('任务标记完成，但缺少验收条件或验证记录')
+            if state['status'] == 'in_progress' and not state['verification']:
+                result['notes'].append('进行中的任务尚无验证记录；阶段结束时补充实际证据')
+            if state['updated']:
+                try:
+                    updated = datetime.date.fromisoformat(state['updated'])
+                    age = (datetime.date.today() - updated).days
+                    result['state_age_days'] = age
+                    if age > 14 and state['status'] in ('in_progress', 'blocked'):
+                        result['warnings'].append(
+                            '当前任务状态已 %d 天未更新，请先运行 resume 核查是否仍有效' % age)
+                except ValueError:
+                    result['warnings'].append('STATE.json 的 updated 不是 YYYY-MM-DD 日期')
         except core.DataError as error:
             result['issues'].append(str(error))
 
@@ -102,6 +115,13 @@ def check(path):
 
     # 5) 版本
     meta = core.harness_meta(path)
+    if os.path.isfile(os.path.join(wb, core.HARNESS_MARK)):
+        identity = core.project_identity(path)
+        result['identity_consistent'] = identity['consistent']
+        if not identity['consistent'] and not identity.get('unmanaged'):
+            result['issues'].append(identity['error'])
+        elif identity.get('unmanaged'):
+            result['notes'].append('PROJECT.md 使用自定义标题，无法自动核对项目身份')
     profile = meta.get('profile', '')
     try:
         module_config = modules.configuration(meta)
@@ -139,6 +159,14 @@ def check(path):
     if kv and kv != core.KIT_VERSION:
         result['warnings'].append('项目标记的 kit 版本是 %s，当前是 %s——可跑 sync 补齐新文件'
                                   % (kv, core.KIT_VERSION))
+    agents = os.path.join(path, 'AGENTS.md')
+    if os.path.isfile(agents):
+        try:
+            core.agents_plan(path)
+        except core.DataError as error:
+            result['issues'].append(str(error))
+    else:
+        result['notes'].append('未发现根 AGENTS.md；需要兼容客户端入口时使用 --agents-md')
     return result
 
 

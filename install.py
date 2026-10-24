@@ -38,34 +38,40 @@ def main(argv=None):
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, 'reconfigure'):
             stream.reconfigure(encoding='utf-8')
-    parser = argparse.ArgumentParser(description='安装 harness-kit；默认不接入任何宿主')
+    parser = argparse.ArgumentParser(description='安装 harness-kit 工具与可选技能')
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--in-place', action='store_true', help='原地使用源码')
     mode.add_argument('--to', help='复制代码到指定目录')
     parser.add_argument('--host-config-dir', help='明确指定宿主配置目录')
     parser.add_argument('--skill-dir', help='指定技能父目录，将安装 harness-init/ 子目录')
-    hook = parser.add_mutually_exclusive_group()
-    hook.add_argument('--with-hook', action='store_true', help='显式注册 hook（提示默认仍关闭）')
-    hook.add_argument('--no-hook', action='store_true', help='保留兼容参数；默认不注册 hook')
-    parser.add_argument('--uninstall', action='store_true', help='移除记录中的 hook；代码与技能手动清理')
+    parser.add_argument('--uninstall', action='store_true', help='清理记录中的旧 hook；代码与技能手动清理')
     args = parser.parse_args(argv)
     host = args.host_config_dir or core.host_config_dir()
     host = Path(host).expanduser().resolve() if host else None
-    if args.with_hook and not host:
-        parser.error('--with-hook 需要 --host-config-dir 或 HARNESS_HOST_CONFIG_DIR')
     settings = host / 'settings.json' if host else None
-    if args.with_hook and not settings.is_file():
-        parser.error('宿主 settings.json 不存在，请先启动宿主生成配置')
     manifest_path = Path(core.runtime_home()) / 'installation.json'
     if args.uninstall:
         record = core.read_json(str(manifest_path), {})
         registered = str(settings) if settings else record.get('settings')
         if registered:
-            result = subprocess.run([sys.executable, str(HERE / 'kit/install_hook.py'),
-                                     '--settings', registered, '--remove'])
+            if not Path(registered).is_file():
+                raise core.DataError('安装记录中的宿主配置不存在：%s；请用 --host-config-dir 指定或手动清理' % registered)
+            code_dir = Path(record.get('code_dir') or HERE)
+            legacy_script = code_dir / 'kit/install_hook.py'
+            if not legacy_script.is_file():
+                legacy_script = HERE / 'kit/install_hook.py'
+            command = [sys.executable, str(legacy_script), '--settings', registered, '--remove']
+            candidates = [record.get('hook_script'),
+                          str(code_dir / 'kit/hook_session_start.py'),
+                          str(HERE / 'kit/hook_session_start.py')]
+            for candidate in dict.fromkeys(path for path in candidates if path):
+                command.extend(['--legacy-script', candidate])
+            result = subprocess.run(command)
             if result.returncode:
                 return result.returncode
-        print('已移除指定或记录的 hook。代码、技能、配置和项目内容均保留，可按需手动清理。')
+            print('旧 hook 清理完成；代码、技能和项目内容保留。')
+        else:
+            print('没有记录的旧 hook；代码、技能和项目内容保留。')
         return 0
     core.get_config()
     code_dir = HERE if args.in_place else Path(args.to or (Path(core.runtime_home()) / 'code')).expanduser().resolve()
@@ -80,21 +86,12 @@ def main(argv=None):
         install_skill(skill_path, code_dir)
     record = core.read_json(str(manifest_path), {})
     record.update({'code_dir': str(code_dir), 'skill_dir': str(skill_path) if skill_path else None})
-    if args.with_hook:
-        result = subprocess.run([sys.executable, str(code_dir / 'kit/install_hook.py'),
-                                 '--settings', str(settings)])
-        if result.returncode:
-            return result.returncode
-        record['settings'] = str(settings)
     core.write_json(str(manifest_path), record)
     print('代码与模板：%s' % code_dir)
     print('运行状态：%s' % core.runtime_home())
     if skill_path:
         print('技能：%s（已写入实际代码路径）' % skill_path)
-    if args.with_hook:
-        print('hook 已注册；需要重启宿主。开场提示默认关闭，启用请在 config.json 中设 enabled=true。')
-    else:
-        print('未注册 hook。直接使用命令行或安装的技能即可。')
+    print('直接使用命令行或安装的技能即可；不再注册初始化询问 hook。')
     return 0
 
 

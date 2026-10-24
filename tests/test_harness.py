@@ -163,20 +163,6 @@ class HarnessRegressionTests(unittest.TestCase):
         self.assertIn('问题/警告', output)
         self.assertNotIn('健康分', output)
 
-    def test_hook_default_silent_and_missing_session_silent(self):
-        (self.project / 'src').mkdir()
-        payload = json.dumps({'cwd': str(self.project), 'session_id': uuid.uuid4().hex})
-        self.assertEqual(self.run_cli('kit/hook_session_start.py', stdin=payload), '')
-        state = self.work / 'state'
-        state.mkdir()
-        (state / 'config.json').write_text(json.dumps({'enabled': True}))
-        self.assertEqual(self.run_cli('kit/hook_session_start.py', stdin=json.dumps({'cwd': str(self.project)})), '')
-        result = json.loads(self.run_cli('kit/hook_session_start.py', stdin=payload))
-        self.assertIn('.harness/', result['hookSpecificOutput']['additionalContext'])
-        self.assertIn('--profile comprehensive',
-                      result['hookSpecificOutput']['additionalContext'])
-        self.assertEqual(self.run_cli('kit/hook_session_start.py', stdin=payload), '')
-
     def test_installer_explicit_paths_and_preserves_host_settings(self):
         host = self.work / 'host'
         host.mkdir()
@@ -187,9 +173,7 @@ class HarnessRegressionTests(unittest.TestCase):
         self.assertTrue((code / 'kit/init_harness.py').is_file())
         self.run_cli('install.py', '--in-place')
         self.assertEqual(settings.read_text(), '{"custom": 42}')
-        config = json.loads((self.work / 'state/config.json').read_text())
-        self.assertFalse(config['enabled'])
-        self.run_cli('install.py', '--in-place', '--host-config-dir', host, '--with-hook')
+        self.run_cli('install.py', '--in-place', '--host-config-dir', host)
         self.assertEqual(json.loads(settings.read_text())['custom'], 42)
         skill = (host / 'skills/harness-init/SKILL.md').read_text(encoding='utf-8-sig')
         self.assertIn(ROOT.as_posix(), skill)
@@ -201,6 +185,28 @@ class HarnessRegressionTests(unittest.TestCase):
     def test_installer_rejects_source_contained_destination(self):
         self.run_cli('install.py', '--to', ROOT / 'nested-install', expected=2)
         self.assertFalse((ROOT / 'nested-install').exists())
+
+    def test_copy_install_uninstall_uses_recorded_code_and_settings(self):
+        destination = self.work / 'copied-code'
+        host = self.work / 'host'
+        host.mkdir()
+        settings = host / 'settings.json'
+        script = (ROOT / 'kit/hook_session_start.py').as_posix()
+        settings.write_text(json.dumps({
+            'custom': 42,
+            'hooks': {'SessionStart': [{
+                'matcher': 'startup',
+                'hooks': [{'type': 'command', 'command': '"python" "%s"' % script}],
+            }]},
+        }), encoding='utf-8')
+        self.run_cli('install.py', '--to', destination, '--host-config-dir', host)
+        manifest = self.work / 'state/installation.json'
+        record = json.loads(manifest.read_text(encoding='utf-8'))
+        record['settings'] = str(settings)
+        manifest.write_text(json.dumps(record), encoding='utf-8')
+        self.run_cli('install.py', '--uninstall')
+        result = json.loads(settings.read_text(encoding='utf-8'))
+        self.assertEqual(result, {'custom': 42})
 
     def test_copy_install_contains_skill_and_is_executable(self):
         destination = Path(tempfile.mkdtemp(prefix='harness-kit-copy-')) / 'code'
@@ -222,7 +228,8 @@ class HarnessRegressionTests(unittest.TestCase):
 
     def test_hook_removal_preserves_unrelated_and_shared_entries(self):
         from kit import install_hook
-        ours = install_hook.entry()['hooks'][0]
+        script = (ROOT / 'kit/hook_session_start.py').as_posix()
+        ours = {'type': 'command', 'command': '"python" "%s"' % script}
         other = {'type': 'command', 'command': '"python" "/other/kit/hook_session_start.py"'}
         settings = self.work / 'settings.json'
         settings.write_text(json.dumps({'hooks': {'SessionStart': [
@@ -249,6 +256,69 @@ class HarnessRegressionTests(unittest.TestCase):
         self.init('--agents-md')
         self.assertEqual(agents.read_bytes(), first)
         self.assertEqual(first.count(b'<!-- harness-kit:start -->'), 1)
+
+    def test_checkpoint_preview_and_client_handoff(self):
+        self.init()
+        state = self.project / '.harness/STATE.json'
+        original = state.read_bytes()
+        preview = json.loads(self.run_cli(
+            'kit/checkpoint.py', '--path', self.project, '--dry-run',
+            '--goal', 'Continue in another client', '--status', 'in_progress',
+            '--acceptance', 'Resume has next step', '--next-step', 'Run verification'))
+        self.assertTrue(preview['dry_run'])
+        self.assertEqual(state.read_bytes(), original)
+        self.run_cli(
+            'kit/checkpoint.py', '--path', self.project,
+            '--goal', 'Continue in another client', '--status', 'in_progress',
+            '--acceptance', 'Resume has next step', '--next-step', 'Run verification')
+        resumed = json.loads(self.run_cli('kit/resume.py', '--path', self.project, '--json'))
+        self.assertEqual(resumed['state']['goal'], 'Continue in another client')
+        self.assertEqual(resumed['state']['next_step'], 'Run verification')
+        self.assertEqual(resumed['state']['acceptance'], ['Resume has next step'])
+
+    def test_checkpoint_requires_evidence_for_completion(self):
+        self.init()
+        state = self.project / '.harness/STATE.json'
+        original = state.read_bytes()
+        result = json.loads(self.run_cli(
+            'kit/checkpoint.py', '--path', self.project, '--status', 'completed', expected=2))
+        self.assertIn('acceptance', result['error'])
+        self.assertEqual(state.read_bytes(), original)
+
+        self.run_cli('kit/checkpoint.py', '--path', self.project,
+                     '--acceptance', 'Tests pass', '--verification', 'Tests passed')
+        original = state.read_bytes()
+        result = json.loads(self.run_cli(
+            'kit/checkpoint.py', '--path', self.project, '--status', 'completed',
+            '--clear-verification', expected=2))
+        self.assertIn('verification', result['error'])
+        self.assertEqual(state.read_bytes(), original)
+
+    def test_registry_batch_sync_skips_identity_mismatch_and_preserves_files(self):
+        other = self.work / 'other'
+        other.mkdir()
+        self.init()
+        self.run_cli('kit/init_harness.py', '--path', other)
+        state = self.project / '.harness/STATE.json'
+        state.unlink()
+        marker = other / '.harness/HARNESS.json'
+        meta = json.loads(marker.read_text(encoding='utf-8'))
+        meta['project'] = 'Unrelated Research'
+        marker.write_text(json.dumps(meta), encoding='utf-8')
+        registry = self.work / 'state/projects.json'
+        before = registry.read_bytes()
+        preview = json.loads(self.run_cli('kit/sync.py', '--registered', '--dry-run', expected=1))
+        self.assertEqual(preview['total'], 2)
+        self.assertEqual(preview['synced'], 1)
+        self.assertFalse(state.exists())
+        self.assertEqual(registry.read_bytes(), before)
+        result = json.loads(self.run_cli('kit/sync.py', '--registered', expected=1))
+        self.assertTrue(state.exists())
+        self.assertEqual(json.loads(marker.read_text(encoding='utf-8'))['project'],
+                         'Unrelated Research')
+        mismatch = [item for item in result['details'] if item['path'] == str(other)][0]
+        self.assertEqual(mismatch['skipped'], 'identity_mismatch')
+        self.assertIn('last_synced', json.loads(registry.read_text(encoding='utf-8'))['projects'][0])
 
     def test_init_dry_run_is_complete_and_write_free(self):
         snapshot = sorted((p.relative_to(self.project).as_posix(), p.is_dir())
@@ -369,20 +439,17 @@ class HarnessRegressionTests(unittest.TestCase):
         state = self.work / 'state'
         state.mkdir()
         config = state / 'config.json'
-        for content in ['{broken', '[]', '{"enabled": "false"}',
-                        '{"notify_scope": "unknown"}', '{"checkpoint_interval": 0}',
+        for content in ['{broken', '[]', '{"checkpoint_interval": 0}',
                         '{"memory_max_chars": true}']:
             with self.subTest(content=content):
                 config.write_text(content, encoding='utf-8')
                 result = json.loads(self.run_cli('kit/init_harness.py', '--path', self.project, expected=2))
                 self.assertIn(str(config), result['error'])
                 self.assertFalse((self.project / '.harness').exists())
-                hook = subprocess.run([sys.executable, str(ROOT / 'kit/hook_session_start.py')],
-                                      input=json.dumps({'cwd': str(self.project)}), env=self.env,
-                                      capture_output=True, encoding='utf-8')
-                self.assertEqual(hook.returncode, 2)
-                self.assertEqual(hook.stdout, '')
-                self.assertNotIn('Traceback', hook.stderr)
+                resumed = subprocess.run([sys.executable, str(ROOT / 'kit/resume.py'),
+                                          '--path', str(self.project)], env=self.env,
+                                         capture_output=True, encoding='utf-8')
+                self.assertIn(resumed.returncode, (0, 2))
 
     def test_strict_doctor_and_invalid_task_state(self):
         self.init()
@@ -415,9 +482,29 @@ class HarnessRegressionTests(unittest.TestCase):
         self.assertIn('.workbuddy/STATE.json', agents)
         self.assertNotIn('.harness/', agents)
 
-    def test_hook_registration_requires_target(self):
-        self.run_cli('kit/install_hook.py', expected=1)
-        self.run_cli('install.py', '--in-place', '--with-hook', expected=2)
+    def test_doctor_detects_project_identity_mismatch(self):
+        self.init()
+        marker = self.project / '.harness/HARNESS.json'
+        meta = json.loads(marker.read_text(encoding='utf-8'))
+        meta['project'] = 'Unrelated Research'
+        marker.write_text(json.dumps(meta), encoding='utf-8')
+        report = json.loads(self.run_cli('kit/doctor.py', '--path', self.project, '--json'))
+        self.assertFalse(report['identity_consistent'])
+        self.assertTrue(any('项目身份不一致' in issue for issue in report['issues']))
+
+    def test_doctor_warns_for_stale_active_state(self):
+        self.init()
+        state = self.project / '.harness/STATE.json'
+        value = json.loads(state.read_text(encoding='utf-8'))
+        value.update(goal='Old work', status='in_progress', updated='2000-01-01')
+        state.write_text(json.dumps(value), encoding='utf-8')
+        report = json.loads(self.run_cli('kit/doctor.py', '--path', self.project, '--json'))
+        self.assertTrue(any('未更新' in warning for warning in report['warnings']))
+
+    def test_legacy_hook_cleanup_is_only_for_removal(self):
+        self.run_cli('kit/install_hook.py', '--settings', self.work / 'settings.json', expected=2)
+        self.assertFalse((ROOT / 'kit/hook_session_start.py').exists())
+        self.assertFalse((ROOT / 'kit/mute.py').exists())
 
 
 if __name__ == '__main__':

@@ -217,7 +217,12 @@ def main(argv=None):
     plan = build_plan(root, args)
     if not args.dry_run:
         apply_plan(plan)
-    core.emit_json(report(plan, args.dry_run, root, args))
+    result = report(plan, args.dry_run, root, args)
+    if not args.dry_run:
+        result['registered'] = core.register_project(root)
+    else:
+        result['registered'] = None
+    core.emit_json(result)
     return 0
 
 

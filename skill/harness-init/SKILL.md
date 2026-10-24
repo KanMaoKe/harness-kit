@@ -33,12 +33,15 @@ python "{{KIT_PATH}}/kit/init_harness.py" --path "<项目>"
 ## 恢复任务
 
 ```bash
+python "{{KIT_PATH}}/kit/checkpoint.py" --path "<项目>" --status in_progress --next-step "<下一步>"
 python "{{KIT_PATH}}/kit/resume.py" --path "<项目>" --json
 ```
 
 读取恢复摘要中的目标、下一步、验收、验证及阻塞，再按 `read_first` 读取项目文件。旧项目缺少状态时先用 `sync` 补齐；不要从空模板推断已完成。
 
-当前任务统一记录在 `STATE.json`，按阶段更新 `goal`、`status`、`acceptance`、`verification`、`blockers`、`next_step`、`updated`。验证未完成时如实记录，不标记 `completed`。
+开始任务、完成重要步骤、验证、阻塞或交接时，使用 `checkpoint` 保存当前任务；不要只依赖对话记忆。它只更新 `STATE.json`，不自动总结对话。数组参数可重复，提供后替换原数组；`--dry-run` 不写入。完成状态需要已有验收条件和验证证据。
+
+当前任务统一记录在 `STATE.json`，字段为 `goal`、`status`、`acceptance`、`verification`、`blockers`、`next_step`、`updated`。验证未完成时如实记录，不标记 `completed`。换客户端时先用 `resume` 恢复，不重新调研已有任务。
 
 ## 检查与维护
 
@@ -46,10 +49,12 @@ python "{{KIT_PATH}}/kit/resume.py" --path "<项目>" --json
 python "{{KIT_PATH}}/kit/doctor.py" --path "<项目>" --json
 python "{{KIT_PATH}}/kit/sync.py" --path "<项目>" --dry-run
 python "{{KIT_PATH}}/kit/sync.py" --path "<项目>"
+python "{{KIT_PATH}}/kit/sync.py" --registered --dry-run
+python "{{KIT_PATH}}/kit/sync.py" --registered
 python "{{KIT_PATH}}/kit/status.py" --root "<父目录>" --depth 1
 ```
 
-根据体检结果报告缺件、待补内容与记忆长度建议。`sync` 补齐缺失文件、更新标记，不迁移已有正文。检查点写入、记忆蒸馏与任务上下文读取由 AI 或用户执行，不是后台自动行为。
+根据体检结果报告缺件、项目身份、入口、待补内容与记忆长度建议。初始化成功会登记本机项目；`sync --registered` 一次同步登记项目，身份冲突的项目会跳过。`sync` 补齐缺失文件、更新标记，不迁移已有正文。检查点写入、记忆蒸馏与任务上下文读取由 AI 或用户执行，不是后台自动行为。
 
 `sync` 可用 `--modules` 启用缺失模块模板，或用 `--disable-modules` 停用配置；停用不会删除已有文件。组织方式变更也不会迁移或覆盖旧记录。
 
