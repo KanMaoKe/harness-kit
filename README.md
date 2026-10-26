@@ -1,6 +1,6 @@
 # harness-kit
 
-为 AI 协作项目生成可编辑、可检查的项目上下文脚手架。默认只生成精简核心，不复制项目已有的设计、Issue、ADR 或知识库。
+为 AI 协作项目生成可编辑、可检查的 Agent 工作约束、项目上下文和任务恢复脚手架。默认只生成精简核心，不复制项目已有的设计、Issue、ADR 或知识库。
 
 **Python 3.8+ · 仅使用标准库 · 本地优先 · Unity / Python / Web / 通用模板**
 
@@ -8,11 +8,11 @@
 
 | 功能 | 行为 |
 |---|---|
-| 初始化 | 先预览或直接生成项目规则、任务协作说明和状态文件；完整档另含记忆与技能指南；默认不进入 Git |
+| 初始化 | 先预览或直接生成项目规则、Agent 工作准则和状态文件；完整档另含记忆与技能指南；默认不进入 Git |
 | 存档与恢复 | 在关键节点保存当前任务；换会话或客户端后从同一份状态继续 |
 | 体检 | 检查核心文件、项目身份、入口、任务状态、Git 归属和档案完整性 |
 | 总览 | 读取本机项目登记表，列出类型、harness 状态及检查问题数 |
-| 同步 | 补缺件、更新版本标记，保留已有正文；支持本机登记项目批量同步 |
+| 同步 | 补缺件、更新版本标记，保留已有正文；支持本机登记项目批量同步和 Agent 工作准则刷新 |
 | 可选技能接入 | 从当前源码目录把初始化技能安装到指定客户端目录 |
 
 这是文件层的脚手架。检查点记录、记忆蒸馏、任务上下文选择和技能执行由用户或 AI 完成；未内置模型调用、BM25 / 向量检索、每轮自动注入或验收重试。体检报告只列出可检查的问题，不给项目质量打分。
@@ -33,7 +33,7 @@ python kit/doctor.py --path "../my-project"
 python kit/init_harness.py --path "../my-project" --type generic --name "My Project"
 ```
 
-支持 `unity`、`python`、`web`、`generic`。检测按此顺序进行，未识别的目录使用通用模板。默认 compact 仅生成核心文件；需要通用记忆与技能指南时显式使用 `--profile comprehensive`。
+支持 `unity`、`python`、`web`、`generic`。检测按此顺序进行，未识别的目录使用通用模板。默认 compact 仅生成核心文件；需要通用记忆与技能指南时显式使用 `--profile comprehensive`。通用 Agent 工作准则只维护在 `TASKS.md`，`PROJECT.md` 只记录项目特有约束。
 
 在 Git 工作副本里，初始化默认把 `.harness/` 写入当前工作副本的 `.git/info/exclude`，不改根 `.gitignore`，也不自动 `git add`、提交或推送。只有明确希望团队共享 harness 时才使用 `--share-harness`；`--local-only` 可显式重新启用默认行为。
 
@@ -49,7 +49,7 @@ python kit/init_harness.py --path "../my-project" --type generic --name "My Proj
 
 默认不生成 `memory/`、`skills/` 或治理模块。`--profile comprehensive` 会另外生成 `memory/`（长期记忆、检查点、叙事和日期日志）与 `skills/README.md`。初始化后补全 `PROJECT.md`，调整 `TASKS.md`，在 `STATE.json` 中记录当前任务。稳定规则留在项目约定，阶段状态只更新任务摘要，重要决策按需写入现有设计记录或记忆。
 
-这些扩展记忆不要求和项目已有文档并存：长期约定进 `PROJECT.md`，当前接续点进 `STATE.json`；项目若已有设计、ADR、Issue、进度日志、Feature 注册表或技术债文档，应继续以现有体系为准，在 `TASKS.md` 的「权威文档」中指向它们，避免复制维护。只有缺少合适载体时，再采用 `MEMORY.md`、`CHECKPOINTS.md`、`NARRATIVE.md` 或日期日志。
+`TASKS.md` 同时是 Agent 工作准则的唯一权威来源：先澄清、只解决当前问题、按可验证目标执行、保持单一事实来源、维护交接边界。长期项目事实进 `PROJECT.md`，当前接续点进 `STATE.json`；项目若已有设计、ADR、Issue、进度日志、Feature 注册表或技术债文档，应继续以现有体系为准，在 `TASKS.md` 的「权威文档」中指向它们，避免复制维护。只有缺少合适载体时，再采用 `MEMORY.md`、`CHECKPOINTS.md`、`NARRATIVE.md` 或日期日志。
 
 ### 标准入口
 
@@ -71,6 +71,15 @@ python kit/init_harness.py --path "../my-project" --agents-md
 ```
 
 已经生成过 harness 的项目，用 `sync --dry-run` 预览补缺件或升级。
+
+Agent 工作准则位于 `TASKS.md` 的受管区块。已初始化项目升级时，可只刷新这一段，保留其余正文：
+
+```bash
+python kit/sync.py --path "../my-project" --refresh-agent-rules --dry-run
+python kit/sync.py --path "../my-project" --refresh-agent-rules
+```
+
+旧 `TASKS.md` 没有受管标记时，显式刷新只会在正文末尾追加受管区块，不会改写原规则；标记重复或顺序错误时拒绝写入。需要刷新本机全部登记项目时，把 `--path` 换成 `--registered`。
 
 ### 恢复当前任务
 
@@ -153,6 +162,7 @@ python kit/sync.py --registered
 | `python kit/status.py` | 总览本机登记项目，可加 `--json` |
 | `python kit/sync.py --path "<项目>" --dry-run` | 按项目记录的档位预览补齐；省略 `--dry-run` 执行 |
 | `python kit/sync.py --path "<项目>" --profile comprehensive` | 增加通用记忆和技能指南 |
+| `python kit/sync.py --path "<项目>" --refresh-agent-rules` | 只刷新 `TASKS.md` 中受管的 Agent 工作准则 |
 | `python kit/sync.py --root "<父目录>" --depth 1` | 批量补齐已有 harness 的子项目 |
 | `python kit/sync.py --registered --dry-run` | 预览所有本机登记项目；省略 `--dry-run` 执行 |
 

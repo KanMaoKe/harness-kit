@@ -12,7 +12,7 @@ import sys
 
 # ---- 路径解析 ----------------------------------------------------------------
 
-KIT_VERSION = '2.6'
+KIT_VERSION = '2.7'
 
 # 代码与模板所在目录（本文件在 <root>/kit/ 下）
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -470,6 +470,45 @@ def task_state(path):
 
 AGENTS_START = '<!-- harness-kit:start -->'
 AGENTS_END = '<!-- harness-kit:end -->'
+AGENT_RULES_START = '<!-- harness-kit:agent-rules:start -->'
+AGENT_RULES_END = '<!-- harness-kit:agent-rules:end -->'
+
+
+def agent_rules_block():
+    template = read_text(os.path.join(TEMPLATES_DIR, 'common', 'TASKS.md.tpl'))
+    start = template.index(AGENT_RULES_START)
+    end = template.index(AGENT_RULES_END) + len(AGENT_RULES_END)
+    return template[start:end]
+
+
+def agent_rules_plan(path, allow_append=False):
+    """Plan an in-place refresh of the managed Agent rules section."""
+    filename = os.path.join(project_dir(path), 'TASKS.md')
+    if not os.path.isfile(filename):
+        raise DataError('%s: 缺少 TASKS.md，请先运行 sync 补齐' % filename)
+    with open(filename, 'r', encoding='utf-8', newline='') as stream:
+        existing = stream.read()
+    starts, ends = existing.count(AGENT_RULES_START), existing.count(AGENT_RULES_END)
+    if starts == 0 and ends == 0:
+        if not allow_append:
+            raise DataError('%s: 没有 Agent 工作准则受管标记；请手动加入标记后重试' % filename)
+        content = existing + ('\n\n' if existing and not existing.endswith('\n\n') else '') + agent_rules_block()
+        return {'path': filename, 'exists': True, 'content': content,
+                'changed': content != existing, 'appended': True}
+    if starts != 1 or ends != 1:
+        raise DataError('%s: Agent 工作准则标记不完整或重复，请手动修复' % filename)
+    start, end = existing.index(AGENT_RULES_START), existing.index(AGENT_RULES_END)
+    if start > end:
+        raise DataError('%s: Agent 工作准则标记顺序错误' % filename)
+    content = existing[:start] + agent_rules_block() + existing[end + len(AGENT_RULES_END):]
+    return {'path': filename, 'exists': True, 'content': content,
+            'changed': content != existing, 'appended': False}
+
+
+def apply_agent_rules(plan):
+    if plan['changed']:
+        with open(plan['path'], 'w', encoding='utf-8', newline='') as stream:
+            stream.write(plan['content'])
 
 
 def agents_content(path, existing=''):

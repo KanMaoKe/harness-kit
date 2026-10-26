@@ -32,8 +32,8 @@ FILES = [
 ]
 
 
-def sync_one(path, dry_run=False, agents_md=False, profile='', git_visibility='',
-             require_identity=False, register=False):
+def sync_one(path, dry_run=False, agents_md=False, refresh_agent_rules=False,
+             profile='', git_visibility='', require_identity=False, register=False):
     path = os.path.normpath(os.path.abspath(path))
     wb = core.project_dir(path)
     if not os.path.isdir(wb):
@@ -45,6 +45,13 @@ def sync_one(path, dry_run=False, agents_md=False, profile='', git_visibility=''
         if not identity['consistent']:
             return {'ok': False, 'path': path, 'error': identity['error'],
                     'skipped': 'identity_mismatch'}
+    if refresh_agent_rules:
+        rules_plan = core.agent_rules_plan(path, allow_append=True)
+        if not dry_run:
+            core.apply_agent_rules(rules_plan)
+        return {'ok': True, 'path': path, 'agent_rules': {
+            'path': rules_plan['path'], 'changed': rules_plan['changed'],
+            'appended': rules_plan['appended'], 'dry_run': dry_run}}
     ptype = meta.get('type', '') or core.detect_project(path)[1] or 'generic'
     name = meta.get('project', '') or os.path.basename(path.rstrip('\\/'))
     cfg = core.get_config()
@@ -148,6 +155,8 @@ def main(argv=None):
     ap.add_argument('--depth', type=int, default=1)
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--agents-md', action='store_true', help='创建或更新根目录 AGENTS.md 托管片段')
+    ap.add_argument('--refresh-agent-rules', action='store_true',
+                    help='只刷新 TASKS.md 中受管的 Agent 工作准则，保留其他正文')
     ap.add_argument('--profile', choices=('comprehensive', 'compact'), help='覆盖目标项目记录的模板档位')
     visibility = ap.add_mutually_exclusive_group()
     visibility.add_argument('--share-harness', dest='git_visibility', action='store_const',
@@ -161,6 +170,8 @@ def main(argv=None):
     selected = [bool(args.path), bool(args.root), args.registered]
     if sum(selected) != 1:
         ap.error('--path、--root、--registered 必须且只能选择一个')
+    if args.refresh_agent_rules and not (args.path or args.registered):
+        ap.error('--refresh-agent-rules 只支持 --path 或 --registered')
     if args.registered:
         targets = [entry['path'] for entry in core.registered_projects()]
     elif args.path:
@@ -179,14 +190,15 @@ def main(argv=None):
                 p = os.path.join(cur, x)
                 if os.path.isdir(core.project_dir(p)):
                     targets.append(p)
-    results = [sync_one(t, args.dry_run, args.agents_md, args.profile,
+    results = [sync_one(t, args.dry_run, args.agents_md, args.refresh_agent_rules, args.profile,
                         args.git_visibility, require_identity=args.registered,
                         register=not args.dry_run) for t in targets]
     ok = [r for r in results if r.get('ok')]
     changed = [r for r in ok if r.get('added') or r.get('version_updated')
                or r.get('git_visibility_updated')
                or (r.get('git_exclude') or {}).get('changed')
-               or (r.get('agents_md') or {}).get('changed')]
+               or (r.get('agents_md') or {}).get('changed')
+               or (r.get('agent_rules') or {}).get('changed')]
 
     core.emit_json({
         'total': len(results),

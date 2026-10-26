@@ -2,6 +2,9 @@
 
 ## 未发布
 
+- 提炼 Agent 工作准则：`TASKS.md` 统一维护澄清、范围控制、修改边界、验证和交接规则，`PROJECT.md` 只保留项目特有约束。
+- 新增 `sync --refresh-agent-rules`，只刷新 `TASKS.md` 的受管 Agent 准则，保留其他正文；标记缺失或损坏时拒绝写入。
+- 工具版本升级为 2.7。
 - 移除可选治理模块生成；设计、ADR、Issue、技术债与 Feature 文档改为在 `TASKS.md` 中指向项目已有权威路径，已有文件保留。
 - 移除 Session 治理模块，当前任务交接统一使用 `checkpoint`、`STATE.json` 和 `resume`。
 - `status` 改为读取本机项目登记表，不再独立扫描目录；路径失效的项目会单独标记。

@@ -64,12 +64,53 @@ class HarnessRegressionTests(unittest.TestCase):
         self.init('--type', 'custom')
         self.assertTrue((self.project / '.harness/PROJECT.md').exists())
 
-    def test_task_template_states_design_principles(self):
+    def test_task_template_has_single_agent_working_contract(self):
         self.init()
         text = (self.project / '.harness/TASKS.md').read_text(encoding='utf-8')
-        self.assertIn('设计与实现原则', text)
-        self.assertIn('SSOT', text)
+        project = (self.project / '.harness/PROJECT.md').read_text(encoding='utf-8')
+        self.assertIn('Agent 工作准则', text)
+        self.assertIn('先澄清，再执行', text)
+        self.assertIn('只解决当前问题', text)
+        self.assertIn('按可验证目标执行', text)
+        self.assertIn('保持单一事实来源', text)
+        self.assertIn('通用 Agent 工作方式与任务流程见 `TASKS.md`', project)
+        self.assertNotIn('## ⑥ 开发铁律', project)
         self.assertNotIn('{{', text)
+
+    def test_refresh_agent_rules_updates_only_managed_block(self):
+        self.init()
+        tasks = self.project / '.harness/TASKS.md'
+        original = tasks.read_text(encoding='utf-8')
+        custom = original.replace(
+            '<!-- harness-kit:agent-rules:start -->\n## Agent 工作准则',
+            '<!-- harness-kit:agent-rules:start -->\n## Agent 工作准则\n\n自定义旧规则',
+            1)
+        tasks.write_text('# Custom heading\n\nKeep this.\n\n' + custom, encoding='utf-8')
+        preview = json.loads(self.run_cli(
+            'kit/sync.py', '--path', self.project,
+            '--refresh-agent-rules', '--dry-run'))
+        self.assertTrue(preview['details'][0]['agent_rules']['changed'])
+        self.assertIn('自定义旧规则', tasks.read_text(encoding='utf-8'))
+        self.run_cli('kit/sync.py', '--path', self.project, '--refresh-agent-rules')
+        refreshed = tasks.read_text(encoding='utf-8')
+        self.assertTrue(refreshed.startswith('# Custom heading\n\nKeep this.\n\n'))
+        self.assertNotIn('自定义旧规则', refreshed)
+        self.assertIn('先澄清，再执行', refreshed)
+
+    def test_refresh_agent_rules_appends_to_legacy_tasks(self):
+        self.init()
+        tasks = self.project / '.harness/TASKS.md'
+        tasks.write_text('# Custom rules\n', encoding='utf-8')
+        preview = json.loads(self.run_cli(
+            'kit/sync.py', '--path', self.project,
+            '--refresh-agent-rules', '--dry-run'))
+        self.assertTrue(preview['details'][0]['agent_rules']['appended'])
+        self.assertEqual(tasks.read_text(encoding='utf-8'), '# Custom rules\n')
+        self.run_cli('kit/sync.py', '--path', self.project, '--refresh-agent-rules')
+        refreshed = tasks.read_text(encoding='utf-8')
+        self.assertTrue(refreshed.startswith('# Custom rules\n\n'))
+        self.assertIn('Agent 工作准则', refreshed)
+        self.assertIn('<!-- harness-kit:agent-rules:start -->', refreshed)
 
     def test_compact_is_default_and_comprehensive_is_opt_in(self):
         self.init()
