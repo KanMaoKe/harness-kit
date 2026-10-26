@@ -21,7 +21,6 @@ class HarnessRegressionTests(unittest.TestCase):
         self.env = dict(os.environ, HARNESS_KIT_HOME=str(self.work / 'state'),
                         PYTHONDONTWRITEBYTECODE='1', PYTHONIOENCODING='utf-8')
         self.env.pop('HARNESS_HOST_CONFIG_DIR', None)
-        self.env.pop('CODEBUDDY_CONFIG_DIR', None)
         self.env.pop('HARNESS_KIT_SETTINGS', None)
         self.env['TEMP'] = self.env['TMP'] = str(self.work)
 
@@ -51,19 +50,6 @@ class HarnessRegressionTests(unittest.TestCase):
         self.init('--force')
         self.assertNotEqual(project.read_text(encoding='utf-8'), 'My rules')
         self.assertEqual(memory.read_text(), 'My memory')
-
-    def test_legacy_reused_without_new_directory(self):
-        legacy = self.project / '.workbuddy'
-        legacy.mkdir()
-        (legacy / 'PROJECT.md').write_text('Legacy rules')
-        self.init()
-        self.assertFalse((self.project / '.harness').exists())
-        self.assertEqual((legacy / 'PROJECT.md').read_text(), 'Legacy rules')
-        result = json.loads(self.run_cli('kit/doctor.py', '--path', self.project, '--json'))
-        self.assertEqual(result['issues'], [])
-        (legacy / 'TASKS.md').unlink()
-        self.run_cli('kit/sync.py', '--path', self.project)
-        self.assertTrue((legacy / 'TASKS.md').exists())
 
     def test_unrelated_host_directory_is_not_a_harness(self):
         host = self.project / '.workbuddy'
@@ -110,137 +96,67 @@ class HarnessRegressionTests(unittest.TestCase):
         self.assertTrue((full / '.harness/memory/MEMORY.md').exists())
         self.assertTrue((full / '.harness/skills/README.md').exists())
 
-    def test_modules_generate_additively_and_doctor_checks_enabled_files(self):
-        result = self.init('--modules', 'bugs,design,adr,debt,features,sessions')
+    def test_governance_files_are_not_generated_but_existing_files_are_preserved(self):
         harness = self.project / '.harness'
-        self.assertEqual(set(result['enabled_modules']),
-                         {'bugs', 'design', 'adr', 'debt', 'features', 'sessions'})
-        for rel in ('bugs/README.md', 'bugs/BUG_TEMPLATE.md', 'design/DESIGN_TEMPLATE.md',
-                    'adrs/ADR_TEMPLATE.md', 'sessions/SESSION_TEMPLATE.md',
-                    'features/FEATURE_REGISTRY.md', 'TECH_DEBT.md', 'RECORDS.md'):
-            self.assertTrue((harness / rel).is_file(), rel)
-        bug_template = (harness / 'bugs/BUG_TEMPLATE.md').read_bytes().decode('utf-8')
-        self.assertIn('\u73af\u5883\u4e0e\u590d\u73b0', bug_template)
-        report = json.loads(self.run_cli('kit/doctor.py', '--path', self.project, '--json'))
-        self.assertFalse(report['issues'])
-        (harness / 'bugs/README.md').unlink()
-        report = json.loads(self.run_cli('kit/doctor.py', '--path', self.project, '--json'))
-        self.assertTrue(any('bugs/README.md' in issue for issue in report['issues']))
+        custom = harness / 'bugs/BUG-0001-existing.md'
+        custom.parent.mkdir(parents=True)
+        custom.write_text('existing issue', encoding='utf-8')
+        result = self.init()
+        self.assertFalse((harness / 'sessions').exists())
+        self.assertFalse((harness / 'adrs').exists())
+        self.assertFalse((harness / 'features').exists())
+        self.assertNotIn('enabled_modules', result)
+        self.assertNotIn('modules', json.loads(
+            (harness / 'HARNESS.json').read_text(encoding='utf-8')))
+        self.run_cli('kit/sync.py', '--path', self.project)
+        self.assertEqual(custom.read_text(encoding='utf-8'), 'existing issue')
 
-    def test_debt_storage_and_disabling_preserve_files(self):
-        self.init('--modules', 'debt', '--debt-storage', 'entries')
-        harness = self.project / '.harness'
-        self.assertTrue((harness / 'debt/DEBT_TEMPLATE.md').is_file())
-        self.assertFalse((harness / 'TECH_DEBT.md').exists())
-        custom = harness / 'debt/DEBT-0001-example.md'
-        custom.write_text('custom entry', encoding='utf-8')
-        self.run_cli('kit/sync.py', '--path', self.project, '--disable-modules', 'debt')
-        meta = json.loads((harness / 'HARNESS.json').read_text(encoding='utf-8'))
-        self.assertFalse(meta['modules']['debt']['enabled'])
-        self.assertEqual(custom.read_text(encoding='utf-8'), 'custom entry')
-        self.assertTrue((harness / 'debt/DEBT_TEMPLATE.md').exists())
-
-    def test_legacy_profile_without_metadata_keeps_comprehensive_sync(self):
-        self.init('--profile', 'comprehensive')
+    def test_missing_profile_uses_compact_instead_of_legacy_fallback(self):
+        self.init('--profile', 'compact')
         marker = self.project / '.harness/HARNESS.json'
         meta = json.loads(marker.read_text(encoding='utf-8'))
         del meta['profile']
         marker.write_text(json.dumps(meta), encoding='utf-8')
-        (self.project / '.harness/memory/MEMORY.md').unlink()
         self.run_cli('kit/sync.py', '--path', self.project)
-        self.assertTrue((self.project / '.harness/memory/MEMORY.md').exists())
+        self.assertFalse((self.project / '.harness/memory').exists())
+        self.assertEqual(json.loads(marker.read_text(encoding='utf-8'))['profile'], 'compact')
 
-    def test_module_args_validate_before_writing(self):
-        result = json.loads(self.run_cli('kit/init_harness.py', '--path', self.project,
-                                         '--modules', 'bugs,unknown', expected=2))
-        self.assertFalse(result['ok'])
+    def test_removed_module_args_fail_before_writing(self):
+        self.run_cli('kit/init_harness.py', '--path', self.project,
+                     '--modules', 'bugs', expected=2)
         self.assertFalse((self.project / '.harness').exists())
 
     def test_status_lists_issue_counts_instead_of_quality_score(self):
-        (self.project / 'src').mkdir()
         self.init('--profile', 'compact')
-        output = self.run_cli('kit/status.py', '--root', self.work, '--depth', '1')
+        output = self.run_cli('kit/status.py')
         self.assertIn('问题/警告', output)
         self.assertNotIn('健康分', output)
+        self.assertIn(str(self.project), output)
+        report = json.loads(self.run_cli('kit/status.py', '--json'))
+        self.assertEqual(report['count'], 1)
+        self.assertEqual(report['items'][0]['path'], str(self.project))
 
-    def test_installer_explicit_paths_and_preserves_host_settings(self):
+    def test_status_repairs_registered_harness_directory(self):
+        self.init()
+        registry = self.work / 'state/projects.json'
+        value = json.loads(registry.read_text(encoding='utf-8'))
+        value['projects'][0]['harness_dir'] = '.workbuddy'
+        registry.write_text(json.dumps(value), encoding='utf-8')
+        self.run_cli('kit/status.py', '--json')
+        updated = json.loads(registry.read_text(encoding='utf-8'))
+        self.assertEqual(updated['projects'][0]['harness_dir'], '.harness')
+
+    def test_installer_only_installs_explicit_skill(self):
         host = self.work / 'host'
         host.mkdir()
         settings = host / 'settings.json'
         settings.write_text('{"custom": 42}')
-        code = self.work / 'installed-code'
-        self.run_cli('install.py', '--to', code)
-        self.assertTrue((code / 'kit/init_harness.py').is_file())
-        self.run_cli('install.py', '--in-place')
-        self.assertEqual(settings.read_text(), '{"custom": 42}')
-        self.run_cli('install.py', '--in-place', '--host-config-dir', host)
+        self.run_cli('install.py', '--host-config-dir', host)
         self.assertEqual(json.loads(settings.read_text())['custom'], 42)
         skill = (host / 'skills/harness-init/SKILL.md').read_text(encoding='utf-8-sig')
         self.assertIn(ROOT.as_posix(), skill)
         self.assertNotIn('{{KIT_PATH}}', skill)
-        self.run_cli('install.py', '--uninstall')
-        self.assertEqual(json.loads(settings.read_text()), {'custom': 42})
-        self.assertTrue((host / 'skills/harness-init/SKILL.md').exists())
-
-    def test_installer_rejects_source_contained_destination(self):
-        self.run_cli('install.py', '--to', ROOT / 'nested-install', expected=2)
-        self.assertFalse((ROOT / 'nested-install').exists())
-
-    def test_copy_install_uninstall_uses_recorded_code_and_settings(self):
-        destination = self.work / 'copied-code'
-        host = self.work / 'host'
-        host.mkdir()
-        settings = host / 'settings.json'
-        script = (ROOT / 'kit/hook_session_start.py').as_posix()
-        settings.write_text(json.dumps({
-            'custom': 42,
-            'hooks': {'SessionStart': [{
-                'matcher': 'startup',
-                'hooks': [{'type': 'command', 'command': '"python" "%s"' % script}],
-            }]},
-        }), encoding='utf-8')
-        self.run_cli('install.py', '--to', destination, '--host-config-dir', host)
-        manifest = self.work / 'state/installation.json'
-        record = json.loads(manifest.read_text(encoding='utf-8'))
-        record['settings'] = str(settings)
-        manifest.write_text(json.dumps(record), encoding='utf-8')
-        self.run_cli('install.py', '--uninstall')
-        result = json.loads(settings.read_text(encoding='utf-8'))
-        self.assertEqual(result, {'custom': 42})
-
-    def test_copy_install_contains_skill_and_is_executable(self):
-        destination = Path(tempfile.mkdtemp(prefix='harness-kit-copy-')) / 'code'
-        try:
-            self.run_cli('install.py', '--to', destination, '--skill-dir', self.work / 'skills')
-            self.assertTrue((destination / 'skill/harness-init/SKILL.md').is_file())
-            self.assertTrue((destination / 'install.py').is_file())
-            result = subprocess.run([sys.executable, str(destination / 'kit/init_harness.py'),
-                                     '--path', str(self.project)], env=self.env,
-                                    capture_output=True, encoding='utf-8')
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertTrue(json.loads(result.stdout)['ok'])
-            skill = (self.work / 'skills/harness-init/SKILL.md').read_text(encoding='utf-8-sig')
-            self.assertIn(destination.as_posix(), skill)
-        finally:
-            if destination.exists():
-                assert destination.parent.name.startswith('harness-kit-copy-')
-                shutil.rmtree(destination.parent)
-
-    def test_hook_removal_preserves_unrelated_and_shared_entries(self):
-        from kit import install_hook
-        script = (ROOT / 'kit/hook_session_start.py').as_posix()
-        ours = {'type': 'command', 'command': '"python" "%s"' % script}
-        other = {'type': 'command', 'command': '"python" "/other/kit/hook_session_start.py"'}
-        settings = self.work / 'settings.json'
-        settings.write_text(json.dumps({'hooks': {'SessionStart': [
-            {'matcher': 'startup', 'hooks': [ours, other]},
-            {'matcher': 'resume', 'hooks': [other]}]}, 'custom': 42}), encoding='utf-8')
-        self.run_cli('kit/install_hook.py', '--settings', settings, '--remove')
-        result = json.loads(settings.read_text())
-        self.assertEqual(result['custom'], 42)
-        self.assertEqual(result['hooks']['SessionStart'], [
-            {'matcher': 'startup', 'hooks': [other]},
-            {'matcher': 'resume', 'hooks': [other]}])
+        self.run_cli('install.py', expected=2)
 
     def test_agents_opt_in_preserves_existing_and_is_idempotent(self):
         agents = self.project / 'AGENTS.md'
@@ -439,7 +355,7 @@ class HarnessRegressionTests(unittest.TestCase):
         state = self.work / 'state'
         state.mkdir()
         config = state / 'config.json'
-        for content in ['{broken', '[]', '{"checkpoint_interval": 0}',
+        for content in ['{broken', '[]', '{"memory_max_chars": 0}',
                         '{"memory_max_chars": true}']:
             with self.subTest(content=content):
                 config.write_text(content, encoding='utf-8')
@@ -473,15 +389,6 @@ class HarnessRegressionTests(unittest.TestCase):
         result = json.loads(self.run_cli('kit/resume.py', '--path', self.project, '--json'))
         self.assertTrue(result['warnings'])
 
-    def test_legacy_agents_entry_points_to_actual_folder(self):
-        legacy = self.project / '.workbuddy'
-        legacy.mkdir()
-        (legacy / 'PROJECT.md').write_text('Legacy rules')
-        self.init('--agents-md')
-        agents = (self.project / 'AGENTS.md').read_text(encoding='utf-8')
-        self.assertIn('.workbuddy/STATE.json', agents)
-        self.assertNotIn('.harness/', agents)
-
     def test_doctor_detects_project_identity_mismatch(self):
         self.init()
         marker = self.project / '.harness/HARNESS.json'
@@ -500,12 +407,6 @@ class HarnessRegressionTests(unittest.TestCase):
         state.write_text(json.dumps(value), encoding='utf-8')
         report = json.loads(self.run_cli('kit/doctor.py', '--path', self.project, '--json'))
         self.assertTrue(any('未更新' in warning for warning in report['warnings']))
-
-    def test_legacy_hook_cleanup_is_only_for_removal(self):
-        self.run_cli('kit/install_hook.py', '--settings', self.work / 'settings.json', expected=2)
-        self.assertFalse((ROOT / 'kit/hook_session_start.py').exists())
-        self.assertFalse((ROOT / 'kit/mute.py').exists())
-
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,6 +1,6 @@
 # harness-kit
 
-为 AI 协作项目生成可编辑、可检查的项目上下文脚手架。默认只生成精简核心；设计、ADR、Bug、Session、技术债和 Feature 等治理模块按需启用。
+为 AI 协作项目生成可编辑、可检查的项目上下文脚手架。默认只生成精简核心，不复制项目已有的设计、Issue、ADR 或知识库。
 
 **Python 3.8+ · 仅使用标准库 · 本地优先 · Unity / Python / Web / 通用模板**
 
@@ -11,9 +11,9 @@
 | 初始化 | 先预览或直接生成项目规则、任务协作说明和状态文件；完整档另含记忆与技能指南；默认不进入 Git |
 | 存档与恢复 | 在关键节点保存当前任务；换会话或客户端后从同一份状态继续 |
 | 体检 | 检查核心文件、项目身份、入口、任务状态、Git 归属和档案完整性 |
-| 总览 | 扫描多个项目，列出类型、harness 状态及检查问题数 |
+| 总览 | 读取本机项目登记表，列出类型、harness 状态及检查问题数 |
 | 同步 | 补缺件、更新版本标记，保留已有正文；支持本机登记项目批量同步 |
-| 可选技能接入 | 将技能安装到指定目录，供支持的 AI 客户端使用 |
+| 可选技能接入 | 从当前源码目录把初始化技能安装到指定客户端目录 |
 
 这是文件层的脚手架。检查点记录、记忆蒸馏、任务上下文选择和技能执行由用户或 AI 完成；未内置模型调用、BM25 / 向量检索、每轮自动注入或验收重试。体检报告只列出可检查的问题，不给项目质量打分。
 
@@ -33,16 +33,9 @@ python kit/doctor.py --path "../my-project"
 python kit/init_harness.py --path "../my-project" --type generic --name "My Project"
 ```
 
-支持 `unity`、`python`、`web`、`generic`。检测按此顺序进行，未识别的目录使用通用模板。默认 compact 仅生成核心文件；需要通用记忆与技能指南时显式使用 `--profile comprehensive`。治理模块通过 `--modules` 独立启用，不依赖档位。
+支持 `unity`、`python`、`web`、`generic`。检测按此顺序进行，未识别的目录使用通用模板。默认 compact 仅生成核心文件；需要通用记忆与技能指南时显式使用 `--profile comprehensive`。
 
 在 Git 工作副本里，初始化默认把 `.harness/` 写入当前工作副本的 `.git/info/exclude`，不改根 `.gitignore`，也不自动 `git add`、提交或推送。只有明确希望团队共享 harness 时才使用 `--share-harness`；`--local-only` 可显式重新启用默认行为。
-
-```bash
-python kit/init_harness.py --path "../my-project" --modules bugs,design,adr,debt
-python kit/init_harness.py --path "../my-project" --modules debt --debt-storage entries
-```
-
-Bug 模块固定采用条目式；技术债默认生成 `TECH_DEBT.md` 清单，也可选 `entries`。停用模块只更新配置，不删除已有文件。模块选择前应先检查项目现有 issue tracker、设计记录和队列，避免建立重复的权威记录。
 
 ## 文件结构与使用
 
@@ -56,7 +49,7 @@ Bug 模块固定采用条目式；技术债默认生成 `TECH_DEBT.md` 清单，
 
 默认不生成 `memory/`、`skills/` 或治理模块。`--profile comprehensive` 会另外生成 `memory/`（长期记忆、检查点、叙事和日期日志）与 `skills/README.md`。初始化后补全 `PROJECT.md`，调整 `TASKS.md`，在 `STATE.json` 中记录当前任务。稳定规则留在项目约定，阶段状态只更新任务摘要，重要决策按需写入现有设计记录或记忆。
 
-这些扩展记忆不要求和项目已有文档并存：长期约定进 `PROJECT.md`，当前接续点进 `STATE.json`；项目若已有 ADR、进度日志、Feature 注册表或技术债文档，应继续以现有体系为准，在 `TASKS.md` 里指向它们，避免复制维护。只有缺少合适载体时，再采用 `MEMORY.md`、`CHECKPOINTS.md`、`NARRATIVE.md` 或日期日志。
+这些扩展记忆不要求和项目已有文档并存：长期约定进 `PROJECT.md`，当前接续点进 `STATE.json`；项目若已有设计、ADR、Issue、进度日志、Feature 注册表或技术债文档，应继续以现有体系为准，在 `TASKS.md` 的「权威文档」中指向它们，避免复制维护。只有缺少合适载体时，再采用 `MEMORY.md`、`CHECKPOINTS.md`、`NARRATIVE.md` 或日期日志。
 
 ### 标准入口
 
@@ -118,41 +111,18 @@ python kit/resume.py --path "../my-project" --json
 python kit/init_harness.py --path "../my-project" --force
 ```
 
-`--force` 仅允许覆盖 `PROJECT.md`；已有任务规则、技能和记忆正文仍保留。`sync` 同样只补缺件，不把已有正文迁移到新版模板。检查点轮次及日志“只追加”是文本约定，没有后台计数或定时记录。
+`--force` 仅允许覆盖 `PROJECT.md`；已有任务规则、技能和记忆正文仍保留。`sync` 同样只补缺件，不把已有正文迁移到新版模板。检查点及日志“只追加”是文本约定，没有后台定时记录。
 
-## 安装与宿主接入
+## 使用与可选技能接入
 
-默认安装与宿主无关，不注册 hook、不安装到隐含的宿主技能目录。
-
-```bash
-python install.py --in-place
-```
-
-| 选项 | 行为 |
-|---|---|
-| `--in-place` | 直接使用当前仓库，移动仓库后需重新安装技能 |
-| 不带位置选项 | 将代码复制到 `~/.harness-kit/code/` |
-| `--to "<工具安装目录>"` | 复制代码、模板、文档和技能源文件到指定目录 |
-| `--skill-dir "<技能父目录>"` | 安装 `harness-init/`，写入实际代码路径 |
-| `--host-config-dir "<宿主配置目录>"` | 技能安装到其 `skills/harness-init/` |
-
-例如，将技能安装到你使用的 AI 客户端：
+命令行工具直接从源码目录运行，不需要安装。只有希望 AI 客户端发现 `harness-init` 技能时，才显式安装技能：
 
 ```bash
-python install.py --in-place --host-config-dir "<宿主配置目录>"
+python install.py --skill-dir "<技能父目录>"
+python install.py --host-config-dir "<宿主配置目录>"
 ```
 
-初始化询问 hook 和静音功能已移除。需要清理旧注册时，卸载流程会调用保留的 `install_hook.py --remove`；新版不提供 hook 注册。
-
-技能安装后的工具路径与运行状态目录分别维护，移动代码后重新安装即可。手动复制技能时，请将 `SKILL.md` 中的 `{{KIT_PATH}}` 替换为实际代码目录。
-
-### 卸载
-
-```bash
-python install.py --uninstall
-```
-
-移除安装记录中的旧 hook，保留代码、技能、配置和项目文件供手动清理。也可用 `--host-config-dir` 明确指定宿主目录；没有旧 hook 时不会伪报已移除。
+安装器只写入 `skills/harness-init/SKILL.md`，并把工具路径替换为当前源码目录；不复制整套代码、不写安装清单、不注册 hook、不修改客户端设置。移动源码后重新运行安装命令即可。
 
 ### 本机项目登记与同步
 
@@ -177,19 +147,14 @@ python kit/sync.py --registered
 | `python kit/init_harness.py --path "<项目>" --dry-run` | 首次接入预览，不写文件 |
 | `python kit/init_harness.py --path "<项目>" --profile comprehensive` | 增加通用记忆和技能指南 |
 | `python kit/init_harness.py --path "<项目>" --share-harness` | 允许 `.harness/` 跟随项目进入 Git |
-| `python kit/init_harness.py --path "<项目>" --modules bugs,adr,debt` | 启用指定可选模块 |
-| `python kit/init_harness.py --path "<项目>" --modules debt --debt-storage entries` | 技术债使用条目式目录 |
 | `python kit/resume.py --path "<项目>" --json` | 读取任务恢复摘要；省略 `--json` 输出可读报告 |
 | `python kit/checkpoint.py --path "<项目>" --status in_progress --next-step "测试"` | 保存当前任务检查点，可加 `--dry-run` |
 | `python kit/doctor.py --path "<项目>" --json` | 体检 JSON；省略 `--json` 输出可读报告 |
-| `python kit/status.py --root "<父目录>" --depth 1` | 总览直接子项目，可加 `--json` |
+| `python kit/status.py` | 总览本机登记项目，可加 `--json` |
 | `python kit/sync.py --path "<项目>" --dry-run` | 按项目记录的档位预览补齐；省略 `--dry-run` 执行 |
 | `python kit/sync.py --path "<项目>" --profile comprehensive` | 增加通用记忆和技能指南 |
-| `python kit/sync.py --path "<项目>" --modules bugs,adr` | 启用模块并仅补齐缺失模板 |
-| `python kit/sync.py --path "<项目>" --disable-modules bugs` | 停用模块配置，不删除已有文件 |
 | `python kit/sync.py --root "<父目录>" --depth 1` | 批量补齐已有 harness 的子项目 |
 | `python kit/sync.py --registered --dry-run` | 预览所有本机登记项目；省略 `--dry-run` 执行 |
-| `python kit/install_hook.py --settings "<settings.json>" --remove` | 清理旧初始化询问 hook，不支持注册 |
 
 `init_harness`、`checkpoint` 和 `sync` 输出 JSON。配置损坏、JSON 顶层类型错误、配置字段非法或文件读写失败时，命令行输出 `ok: false` 与错误位置，退出码为 2。不存在的配置使用默认值，现有损坏配置不会静默重置。
 
@@ -201,26 +166,24 @@ python kit/sync.py --registered
 
 ```json
 {
-  "checkpoint_interval": 5,
   "memory_max_chars": 3000
 }
 ```
 
 | 字段 | 说明 |
 |---|---|
-| `checkpoint_interval` | 写入新模板的检查点轮次约定，不自动计数 |
 | `memory_max_chars` | 新模板的记忆长度建议及体检阈值 |
 
 | 环境变量 | 用途 |
 |---|---|
-| `HARNESS_KIT_HOME` | 覆盖运行状态目录，也改变默认代码复制目标的父目录 |
+| `HARNESS_KIT_HOME` | 覆盖运行状态目录 |
 | `HARNESS_HOST_CONFIG_DIR` | 显式宿主配置目录，命令行位置参数优先 |
 
 安装器会保留已有运行配置。更改配置不会自动改写已生成的项目文件。
 
 ## 开发与验证
 
-`kit/` 为命令行与旧 hook 清理实现，`templates/` 为项目类型及通用模板，`skill/` 为技能源文件，`tests/` 为行为回归测试。
+`kit/` 为命令行实现，`templates/` 为项目类型及通用模板，`skill/` 为技能源文件，`tests/` 为行为回归测试。
 
 ```bash
 python -m unittest discover -s tests -v
@@ -232,6 +195,7 @@ CI 配置覆盖 Windows、Linux、macOS，以及 Python 3.8 / 3.12 / 3.14。实�
 
 - [项目设计检查](docs/项目设计检查.md)：公开方案对照、当前限制与改进优先级。
 - [设计说明](docs/设计说明.md)：设计背景与文件分层。
+- [记忆设计](docs/记忆设计.md)：项目事实、当前任务、历史档案与外部检索的边界。
 - [能力与边界](docs/机制对照.md)：已实现的工具能力、模板约定与宿主职责。
 
 ## 许可

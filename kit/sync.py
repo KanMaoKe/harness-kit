@@ -18,10 +18,8 @@ import time
 if __package__ in (None, ''):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from kit import core
-    from kit import modules
 else:
     from . import core
-    from . import modules
 
 # (相对路径, 模板路径, 是否属于记忆层)
 FILES = [
@@ -34,8 +32,7 @@ FILES = [
 ]
 
 
-def sync_one(path, dry_run=False, agents_md=False, profile='', enable_modules='',
-             disable_modules='', debt_storage='', git_visibility='',
+def sync_one(path, dry_run=False, agents_md=False, profile='', git_visibility='',
              require_identity=False, register=False):
     path = os.path.normpath(os.path.abspath(path))
     wb = core.project_dir(path)
@@ -60,47 +57,22 @@ def sync_one(path, dry_run=False, agents_md=False, profile='', enable_modules=''
         'DATE': time.strftime('%Y-%m-%d'),
         'TYPE': ptype,
         'UNITY_VERSION': uv or '（待确认）',
-        'CHECKPOINT_INTERVAL': cfg.get('checkpoint_interval', 5),
         'MEMORY_MAX_CHARS': cfg.get('memory_max_chars', 3000),
         'KIT_VERSION': core.KIT_VERSION,
         'HARNESS_DIR': os.path.basename(wb),
     }
 
     added, existing = [], []
-    selected_profile = profile or meta.get('profile', 'comprehensive')
+    selected_profile = profile or meta.get('profile', 'compact')
     if selected_profile not in ('comprehensive', 'compact'):
         raise core.DataError('HARNESS.json 中 profile 必须是 comprehensive 或 compact')
     files = FILES if selected_profile == 'comprehensive' else FILES[:2]
-    try:
-        enable = modules.parse_selection(enable_modules)
-        disable = modules.parse_selection(disable_modules)
-        if set(enable).intersection(disable):
-            raise ValueError('同一模块不能同时启用和停用')
-        module_config = modules.update_configuration(
-            modules.configuration(meta), enable, disable, debt_storage or None)
-    except ValueError as error:
-        raise core.DataError(str(error))
-
     for rel, tpl, _ in files:
         dest = os.path.join(wb, rel.replace('/', os.sep))
         if os.path.exists(dest):
             existing.append(rel)
             continue
         src = os.path.join(core.TEMPLATES_DIR, *tpl)
-        if not os.path.exists(src):
-            continue
-        if not dry_run:
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            with open(dest, 'w', encoding='utf-8') as f:
-                f.write(core.fill(core.read_text(src), vars_))
-        added.append(rel)
-
-    for rel, template in modules.file_specs(module_config):
-        dest = os.path.join(wb, rel.replace('/', os.sep))
-        if os.path.exists(dest):
-            existing.append(rel)
-            continue
-        src = os.path.join(core.TEMPLATES_DIR, 'modules', *template.split('/'))
         if not os.path.exists(src):
             continue
         if not dry_run:
@@ -137,7 +109,6 @@ def sync_one(path, dry_run=False, agents_md=False, profile='', enable_modules=''
 
     # 更新标记
     ver_changed = meta.get('kit_version') != core.KIT_VERSION
-    modules_changed = meta.get('modules', {}) != module_config
     visibility_changed = meta.get('git_visibility', 'local') != selected_visibility
     if not dry_run:
         meta.update({
@@ -146,18 +117,16 @@ def sync_one(path, dry_run=False, agents_md=False, profile='', enable_modules=''
             'project': name,
             'synced': time.strftime('%Y-%m-%d'),
             'profile': selected_profile,
-            'modules': module_config,
             'git_visibility': selected_visibility,
         })
+        meta.pop('modules', None)
         core.write_json(os.path.join(wb, core.HARNESS_MARK), meta)
         if register:
             core.register_project(path)
             core.mark_project_synced(path)
 
     return {'ok': True, 'path': path, 'added': added, 'existing': existing,
-            'enabled_modules': modules.active(module_config),
-            'agents_md': entry, 'version_updated': ver_changed,
-            'modules_updated': modules_changed, 'dry_run': dry_run,
+            'agents_md': entry, 'version_updated': ver_changed, 'dry_run': dry_run,
             'profile': selected_profile,
             'git_visibility': selected_visibility,
             'git_visibility_updated': visibility_changed,
@@ -180,9 +149,6 @@ def main(argv=None):
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--agents-md', action='store_true', help='创建或更新根目录 AGENTS.md 托管片段')
     ap.add_argument('--profile', choices=('comprehensive', 'compact'), help='覆盖目标项目记录的模板档位')
-    ap.add_argument('--modules', default='', help='启用模块，逗号分隔：bugs,design,adr,sessions,debt,features')
-    ap.add_argument('--disable-modules', default='', help='停用模块但保留文件，逗号分隔')
-    ap.add_argument('--debt-storage', choices=('list', 'entries'), help='技术债存储方式')
     visibility = ap.add_mutually_exclusive_group()
     visibility.add_argument('--share-harness', dest='git_visibility', action='store_const',
                             const='shared', help='允许 .harness/ 跟随项目进入 Git')
@@ -214,12 +180,11 @@ def main(argv=None):
                 if os.path.isdir(core.project_dir(p)):
                     targets.append(p)
     results = [sync_one(t, args.dry_run, args.agents_md, args.profile,
-                        args.modules, args.disable_modules, args.debt_storage,
                         args.git_visibility, require_identity=args.registered,
                         register=not args.dry_run) for t in targets]
     ok = [r for r in results if r.get('ok')]
     changed = [r for r in ok if r.get('added') or r.get('version_updated')
-               or r.get('modules_updated') or r.get('git_visibility_updated')
+               or r.get('git_visibility_updated')
                or (r.get('git_exclude') or {}).get('changed')
                or (r.get('agents_md') or {}).get('changed')]
 

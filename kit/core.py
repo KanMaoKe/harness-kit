@@ -27,19 +27,12 @@ def runtime_home():
 
 
 def project_dir(path):
-    """Prefer .harness; reuse legacy .workbuddy only when it contains harness files."""
-    modern = os.path.join(path, '.harness')
-    legacy = os.path.join(path, '.workbuddy')
-    if os.path.isdir(modern):
-        return modern
-    if any(os.path.isfile(os.path.join(legacy, name))
-           for name in (HARNESS_MARK, 'PROJECT.md', 'TASKS.md')):
-        return legacy
-    return modern
+    """Return the single project harness directory."""
+    return os.path.join(path, '.harness')
 
 
 def host_config_dir():
-    value = os.environ.get('HARNESS_HOST_CONFIG_DIR') or os.environ.get('CODEBUDDY_CONFIG_DIR')
+    value = os.environ.get('HARNESS_HOST_CONFIG_DIR')
     return os.path.abspath(os.path.expanduser(value)) if value else None
 
 
@@ -95,7 +88,6 @@ def json_content(data):
 
 
 DEFAULT_CONFIG = {
-    'checkpoint_interval': 5,  # 每 N 轮一个检查点（写进生成的规范里）
     'memory_max_chars': 3000,  # MEMORY.md 建议上限，超过就该蒸馏
 }
 
@@ -103,7 +95,7 @@ DEFAULT_CONFIG = {
 def get_config():
     cfg = dict(DEFAULT_CONFIG)
     cfg.update(read_json(config_path(), {}))
-    for name in ('checkpoint_interval', 'memory_max_chars'):
+    for name in ('memory_max_chars',):
         if type(cfg[name]) is not int or cfg[name] <= 0:
             raise DataError('%s: %s 必须是正整数' % (config_path(), name))
     return cfg
@@ -223,6 +215,23 @@ def registered_projects():
             raise DataError('%s: 每个项目必须包含字符串 path' % registry_path())
         result.append(entry)
     return result
+
+
+def refresh_registered_project(path):
+    """Refresh the harness directory recorded for a still-existing project."""
+    path = os.path.normpath(os.path.abspath(path))
+    if not os.path.isdir(path):
+        return None
+    actual = os.path.basename(project_dir(path))
+    entries = registered_projects()
+    key = _norm(path)
+    for entry in entries:
+        if _norm(entry['path']) == key:
+            if entry.get('harness_dir') != actual:
+                entry['harness_dir'] = actual
+                write_json(registry_path(), {'projects': entries})
+            return entry
+    return None
 
 
 def register_project(path):

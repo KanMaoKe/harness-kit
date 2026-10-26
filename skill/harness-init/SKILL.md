@@ -16,7 +16,7 @@ python "{{KIT_PATH}}/kit/init_harness.py" --path "<项目>" --dry-run
 python "{{KIT_PATH}}/kit/init_harness.py" --path "<项目>"
 ```
 
-新项目默认只生成精简核心。需要记忆和技能指南时显式传入 `--profile comprehensive`。治理模块通过 `--modules bugs,design,adr,sessions,debt,features` 选择，技术债可用 `--debt-storage list|entries` 指定组织方式。
+新项目默认只生成精简核心。需要记忆和技能指南时显式传入 `--profile comprehensive`。
 
 新项目默认写入 `.harness/`。处理已有项目时，以 JSON 输出的 `harness_dir` 为准。
 
@@ -28,7 +28,7 @@ python "{{KIT_PATH}}/kit/init_harness.py" --path "<项目>"
 
 `.harness/` 默认属于本机协作上下文。目标位于 Git 工作副本时，初始化会把相应目录规则写入 `.git/info/exclude`，不修改根 `.gitignore`，也不自动暂存或提交。用户明确要求团队共享时才使用 `--share-harness`。初始化后结合项目补全 `PROJECT.md`，不要将整个记忆目录一次性注入上下文。
 
-用户要求由 AI 判断是否需要扩展时，先检查项目现有文档、Issue/任务跟踪方式和目录约定，再说明每个模块的依据、现有等效机制和可能重复的文件；得到用户选择或明确授权后才启用。没有授权时保持精简核心，不自动添加模块。Bug 启用后固定使用条目式目录；技术债默认清单式，可在确有单文件检索/协作压力时选择条目式。模块只提供模板，不推导出强制评审流程。
+项目已有设计、ADR、Issue、技术债或 Feature 文档时，沿用原体系，并在 `TASKS.md` 的「权威文档」中填写实际路径。不要在 harness 中再生成一份同名记录。只有项目缺少合适载体时，才创建普通文档并保持单一事实来源。
 
 ## 恢复任务
 
@@ -51,11 +51,9 @@ python "{{KIT_PATH}}/kit/sync.py" --path "<项目>" --dry-run
 python "{{KIT_PATH}}/kit/sync.py" --path "<项目>"
 python "{{KIT_PATH}}/kit/sync.py" --registered --dry-run
 python "{{KIT_PATH}}/kit/sync.py" --registered
-python "{{KIT_PATH}}/kit/status.py" --root "<父目录>" --depth 1
+python "{{KIT_PATH}}/kit/status.py"
 ```
 
 根据体检结果报告缺件、项目身份、入口、待补内容与记忆长度建议。初始化成功会登记本机项目；`sync --registered` 一次同步登记项目，身份冲突的项目会跳过。`sync` 补齐缺失文件、更新标记，不迁移已有正文。检查点写入、记忆蒸馏与任务上下文读取由 AI 或用户执行，不是后台自动行为。
-
-`sync` 可用 `--modules` 启用缺失模块模板，或用 `--disable-modules` 停用配置；停用不会删除已有文件。组织方式变更也不会迁移或覆盖旧记录。
 
 已有明确任务时优先完成当前任务，不主动打断用户询问初始化。

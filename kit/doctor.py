@@ -16,10 +16,8 @@ import sys
 if __package__ in (None, ''):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from kit import core
-    from kit import modules
 else:
     from . import core
-    from . import modules
 
 REQUIRED = ['PROJECT.md', 'TASKS.md', 'STATE.json', core.HARNESS_MARK]
 
@@ -123,14 +121,6 @@ def check(path):
         elif identity.get('unmanaged'):
             result['notes'].append('PROJECT.md 使用自定义标题，无法自动核对项目身份')
     profile = meta.get('profile', '')
-    try:
-        module_config = modules.configuration(meta)
-        for rel, _ in modules.file_specs(module_config):
-            if not os.path.isfile(os.path.join(wb, rel.replace('/', os.sep))):
-                result['issues'].append('已启用模块缺少文件：%s' % rel)
-        result['enabled_modules'] = modules.active(module_config)
-    except ValueError as error:
-        result['issues'].append(str(error))
     if profile and profile not in ('compact', 'comprehensive'):
         result['issues'].append('HARNESS.json 中 profile 必须是 comprehensive 或 compact')
     elif profile == 'comprehensive':
@@ -166,7 +156,7 @@ def check(path):
         except core.DataError as error:
             result['issues'].append(str(error))
     else:
-        result['notes'].append('未发现根 AGENTS.md；需要兼容客户端入口时使用 --agents-md')
+        result['notes'].append('未发现根 AGENTS.md；需要项目入口时使用 --agents-md')
     return result
 
 
