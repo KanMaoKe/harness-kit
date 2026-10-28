@@ -12,7 +12,7 @@ import sys
 
 # ---- 路径解析 ----------------------------------------------------------------
 
-KIT_VERSION = '2.8'
+KIT_VERSION = '2.9'
 
 # 代码与模板所在目录（本文件在 <root>/kit/ 下）
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -89,13 +89,16 @@ def json_content(data):
 
 DEFAULT_CONFIG = {
     'memory_max_chars': 3000,  # MEMORY.md 建议上限，超过就该蒸馏
+    'tasks_max_bytes': 8192,
+    'project_max_bytes': 16384,
+    'agents_max_bytes': 32768,  # Codex 默认 32 KiB 上限
 }
 
 
 def get_config():
     cfg = dict(DEFAULT_CONFIG)
     cfg.update(read_json(config_path(), {}))
-    for name in ('memory_max_chars',):
+    for name in ('memory_max_chars', 'tasks_max_bytes', 'project_max_bytes', 'agents_max_bytes'):
         if type(cfg[name]) is not int or cfg[name] <= 0:
             raise DataError('%s: %s 必须是正整数' % (config_path(), name))
     return cfg
@@ -472,6 +475,101 @@ AGENTS_START = '<!-- harness-kit:start -->'
 AGENTS_END = '<!-- harness-kit:end -->'
 AGENT_RULES_START = '<!-- harness-kit:agent-rules:start -->'
 AGENT_RULES_END = '<!-- harness-kit:agent-rules:end -->'
+AUTHORITY_DOCS_START = '<!-- harness-kit:authority-docs:start -->'
+AUTHORITY_DOCS_END = '<!-- harness-kit:authority-docs:end -->'
+
+
+def authority_docs_block():
+    template = read_text(os.path.join(TEMPLATES_DIR, 'common', 'TASKS.md.tpl'))
+    start = template.index(AUTHORITY_DOCS_START)
+    end = template.index(AUTHORITY_DOCS_END) + len(AUTHORITY_DOCS_END)
+    return template[start:end]
+
+
+def authority_docs_plan(path):
+    """Plan inserting the managed authority-docs section near the top of TASKS.md."""
+    filename = os.path.join(project_dir(path), 'TASKS.md')
+    if not os.path.isfile(filename):
+        raise DataError('%s: 缺少 TASKS.md，请先运行 sync 补齐' % filename)
+    with open(filename, 'r', encoding='utf-8', newline='') as stream:
+        existing = stream.read()
+    starts = existing.count(AUTHORITY_DOCS_START)
+    ends = existing.count(AUTHORITY_DOCS_END)
+    if starts == 0 and ends == 0:
+        has_section = bool(re.search(r'^##\s+权威文档\s*$', existing, re.M))
+        if has_section:
+            return {'path': filename, 'changed': False, 'action': 'already_present',
+                    'content': existing}
+        block = authority_docs_block()
+        lines = existing.splitlines(keepends=True)
+        insert_at = 0
+        # Keep the file title and intro paragraph, insert before the first ## section.
+        for idx, line in enumerate(lines):
+            if line.startswith('## '):
+                insert_at = idx
+                break
+        else:
+            insert_at = len(lines)
+        content = ''.join(lines[:insert_at]) + block + '\n\n' + ''.join(lines[insert_at:])
+        return {'path': filename, 'changed': content != existing,
+                'action': 'insert_authority_docs', 'content': content}
+    if starts != 1 or ends != 1:
+        raise DataError('%s: 权威文档标记不完整或重复，请手动修复' % filename)
+    start = existing.index(AUTHORITY_DOCS_START)
+    end = existing.index(AUTHORITY_DOCS_END) + len(AUTHORITY_DOCS_END)
+    if start > end:
+        raise DataError('%s: 权威文档标记顺序错误' % filename)
+    content = existing[:start] + authority_docs_block() + existing[end:]
+    return {'path': filename, 'changed': content != existing,
+            'action': 'refresh_authority_docs', 'content': content}
+
+
+def project_rules_title_plan(path):
+    """Plan renaming the legacy '开发铁律' heading to '项目规则' without touching body text."""
+    filename = os.path.join(project_dir(path), 'PROJECT.md')
+    if not os.path.isfile(filename):
+        return {'path': filename, 'changed': False, 'action': 'no_project',
+                'content': None}
+    with open(filename, 'r', encoding='utf-8', newline='') as stream:
+        existing = stream.read()
+    if '## 项目规则' in existing:
+        return {'path': filename, 'changed': False, 'action': 'already_present',
+                'content': existing}
+    pattern = re.compile(r'^##\s+[^\n]*开发铁律[^\n]*$', re.M)
+    match = pattern.search(existing)
+    if not match:
+        return {'path': filename, 'changed': False, 'action': 'no_legacy_heading',
+                'content': existing}
+    content = existing[:match.start()] + '## 项目规则' + existing[match.end():]
+    return {'path': filename, 'changed': True, 'action': 'rename_dev_rules_heading',
+            'content': content}
+
+
+def structure_migration_plan(path):
+    """Combined plan: insert authority-docs section and rename legacy heading."""
+    docs = authority_docs_plan(path)
+    title = project_rules_title_plan(path)
+    changed = docs['changed'] or title['changed']
+    return {
+        'authority_docs': {k: v for k, v in docs.items() if k != 'content'},
+        'project_rules_title': {k: v for k, v in title.items() if k != 'content'},
+        'changed': changed,
+        'actions': [x for x in (docs['action'], title['action'])
+                    if x not in ('already_present', 'no_legacy_heading', 'no_project')],
+        '_docs_content': docs['content'],
+        '_title_content': title['content'],
+        '_docs_path': docs['path'],
+        '_title_path': title['path'],
+    }
+
+
+def apply_structure_migration(plan):
+    if plan['authority_docs']['changed'] and plan['_docs_content'] is not None:
+        with open(plan['_docs_path'], 'w', encoding='utf-8', newline='') as stream:
+            stream.write(plan['_docs_content'])
+    if plan['project_rules_title']['changed'] and plan['_title_content'] is not None:
+        with open(plan['_title_path'], 'w', encoding='utf-8', newline='') as stream:
+            stream.write(plan['_title_content'])
 
 
 def agent_rules_block():

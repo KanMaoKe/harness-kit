@@ -49,7 +49,7 @@ python kit/init_harness.py --path "../my-project" --type generic --name "My Proj
 
 默认不生成 `memory/`、`skills/` 或治理模块。`--profile comprehensive` 会另外生成 `memory/`（长期记忆、检查点、叙事和日期日志）与 `skills/README.md`。初始化后补全 `PROJECT.md`，调整 `TASKS.md`，在 `STATE.json` 中记录当前任务。稳定规则留在项目约定，阶段状态只更新任务摘要，重要决策按需写入现有设计记录或记忆。
 
-`TASKS.md` 同时是 Agent 工作准则的唯一权威来源：先澄清、只解决当前问题、按可验证目标执行、保持单一事实来源、维护交接边界。长期项目事实进 `PROJECT.md`，当前接续点进 `STATE.json`；项目若已有设计、ADR、Issue、进度日志、Feature 注册表或技术债文档，应继续以现有体系为准，在 `TASKS.md` 的「权威文档」中指向它们，避免复制维护。只有缺少合适载体时，再采用 `MEMORY.md`、`CHECKPOINTS.md`、`NARRATIVE.md` 或日期日志。
+`TASKS.md` 同时是 Agent 工作准则的唯一权威来源：先澄清、只解决当前问题、按可验证目标执行、保持单一事实来源、维护交接边界。长期项目事实进 `PROJECT.md`，当前接续点进 `STATE.json`。项目若已有设计、ADR、Issue、进度日志、Feature 注册表或技术债文档，应继续以现有体系为准，在 `TASKS.md` 的「权威文档」区块中指向项目可共享的清单入口（`AGENTS.md` 或 `docs/README.md`），避免复制维护。只有缺少合适载体时，再采用 `MEMORY.md`、`CHECKPOINTS.md`、`NARRATIVE.md` 或日期日志。
 
 ### 标准入口
 
@@ -80,6 +80,17 @@ python kit/sync.py --path "../my-project" --refresh-agent-rules
 ```
 
 旧 `TASKS.md` 没有受管标记时，显式刷新只会在正文末尾追加受管区块，不会改写原规则；标记重复或顺序错误时拒绝写入。需要刷新本机全部登记项目时，把 `--path` 换成 `--registered`。
+
+### 结构迁移
+
+旧项目可能缺少「权威文档」章节，或 `PROJECT.md` 仍有旧「开发铁律」标题。`doctor` 会检查这些结构缺口。可用显式迁移命令补齐，不删除正文：
+
+```bash
+python kit/sync.py --path "../my-project" --migrate-structure --dry-run
+python kit/sync.py --path "../my-project" --migrate-structure
+```
+
+迁移只做两件事：在 `TASKS.md` 顶部插入受管的「权威文档」区块；把 `PROJECT.md` 的「开发铁律」标题改为「项目规则」。正文、条目和项目特有规则全部保留。具体通用条目的清理由项目 AI 或用户决定。
 
 ### 恢复当前任务
 
@@ -163,6 +174,7 @@ python kit/sync.py --registered
 | `python kit/sync.py --path "<项目>" --dry-run` | 按项目记录的档位预览补齐；省略 `--dry-run` 执行 |
 | `python kit/sync.py --path "<项目>" --profile comprehensive` | 增加通用记忆和技能指南 |
 | `python kit/sync.py --path "<项目>" --refresh-agent-rules` | 只刷新 `TASKS.md` 中受管的 Agent 工作准则 |
+| `python kit/sync.py --path "<项目>" --migrate-structure` | 插入权威文档区块、改旧标题，不删除正文 |
 | `python kit/sync.py --root "<父目录>" --depth 1` | 批量补齐已有 harness 的子项目 |
 | `python kit/sync.py --registered --dry-run` | 预览所有本机登记项目；省略 `--dry-run` 执行 |
 

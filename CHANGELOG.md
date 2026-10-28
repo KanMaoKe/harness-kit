@@ -2,6 +2,10 @@
 
 ## 未发布
 
+- 新增 `sync --migrate-structure`：在旧 `TASKS.md` 插入受管的「权威文档」区块，把 `PROJECT.md` 的「开发铁律」标题改为「项目规则」，不删除正文。
+- `doctor` 检查权威文档章节、旧标题、受管标记和体积超限（TASKS 8 KB / PROJECT 16 KB / AGENTS 32 KB）。
+- 明确权威文档路径清单属于项目可共享内容，放 `AGENTS.md` 或 `docs/README.md`，`TASKS.md` 只记录入口。
+- 工具版本升级为 2.9。
 - 补强 Agent 工作准则：已有项目先读再问，排错先复现并定位根因，完成声明只依据本次验证证据。
 - 工具版本升级为 2.8。
 - 提炼 Agent 工作准则：`TASKS.md` 统一维护澄清、范围控制、修改边界、验证和交接规则，`PROJECT.md` 只保留项目特有约束。

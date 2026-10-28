@@ -2,13 +2,15 @@
 
 本文件是给 AI 和维护者的项目级协作约定。harness-kit 会生成和检查文件，但不会自动识别任务、加载上下文、限制工具或编排步骤；是否读取这些文件取决于客户端入口与操作者。
 
+<!-- harness-kit:authority-docs:start -->
 ## 权威文档
 
-- 项目设计：`PROJECT.md`（本目录）
+- 项目事实：`PROJECT.md`（本目录）
 - 当前任务：`STATE.json`（本目录）
-- 项目已有设计、ADR、Issue、技术债或 Feature 文档：<!-- 填写项目中的实际路径 -->
+- 项目设计、ADR、Issue、技术债或 Feature 清单：见项目 `AGENTS.md` 或 `docs/README.md` 中的权威入口
 
-这里只指向已有权威文档，不在 harness 中复制正文。项目若没有相应体系，按需创建普通文档并保持单一事实来源。
+这里只记录去哪里找权威文档，不复制正文。具体路径清单应放在项目可共享的 `AGENTS.md` 或 `docs/README.md`；本文件默认是本地私有文件，不作为团队唯一权威入口。项目若没有现成清单，按需创建普通文档并保持单一事实来源。
+<!-- harness-kit:authority-docs:end -->
 
 <!-- harness-kit:agent-rules:start -->
 ## Agent 工作准则

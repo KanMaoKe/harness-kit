@@ -33,7 +33,8 @@ FILES = [
 
 
 def sync_one(path, dry_run=False, agents_md=False, refresh_agent_rules=False,
-             profile='', git_visibility='', require_identity=False, register=False):
+             migrate_structure=False, profile='', git_visibility='',
+             require_identity=False, register=False):
     path = os.path.normpath(os.path.abspath(path))
     wb = core.project_dir(path)
     if not os.path.isdir(wb):
@@ -52,6 +53,13 @@ def sync_one(path, dry_run=False, agents_md=False, refresh_agent_rules=False,
         return {'ok': True, 'path': path, 'agent_rules': {
             'path': rules_plan['path'], 'changed': rules_plan['changed'],
             'appended': rules_plan['appended'], 'dry_run': dry_run}}
+    if migrate_structure:
+        plan = core.structure_migration_plan(path)
+        if not dry_run:
+            core.apply_structure_migration(plan)
+        return {'ok': True, 'path': path,
+                'migrate_structure': {k: v for k, v in plan.items() if not k.startswith('_')},
+                'dry_run': dry_run}
     ptype = meta.get('type', '') or core.detect_project(path)[1] or 'generic'
     name = meta.get('project', '') or os.path.basename(path.rstrip('\\/'))
     cfg = core.get_config()
@@ -157,6 +165,8 @@ def main(argv=None):
     ap.add_argument('--agents-md', action='store_true', help='创建或更新根目录 AGENTS.md 托管片段')
     ap.add_argument('--refresh-agent-rules', action='store_true',
                     help='只刷新 TASKS.md 中受管的 Agent 工作准则，保留其他正文')
+    ap.add_argument('--migrate-structure', action='store_true',
+                    help='迁移旧结构：插入权威文档区块、改旧标题，不删除正文')
     ap.add_argument('--profile', choices=('comprehensive', 'compact'), help='覆盖目标项目记录的模板档位')
     visibility = ap.add_mutually_exclusive_group()
     visibility.add_argument('--share-harness', dest='git_visibility', action='store_const',
@@ -170,8 +180,10 @@ def main(argv=None):
     selected = [bool(args.path), bool(args.root), args.registered]
     if sum(selected) != 1:
         ap.error('--path、--root、--registered 必须且只能选择一个')
-    if args.refresh_agent_rules and not (args.path or args.registered):
-        ap.error('--refresh-agent-rules 只支持 --path 或 --registered')
+    if (args.refresh_agent_rules or args.migrate_structure) and not (args.path or args.registered):
+        ap.error('--refresh-agent-rules / --migrate-structure 只支持 --path 或 --registered')
+    if args.refresh_agent_rules and args.migrate_structure:
+        ap.error('--refresh-agent-rules 与 --migrate-structure 不能同时使用')
     if args.registered:
         targets = [entry['path'] for entry in core.registered_projects()]
     elif args.path:
@@ -190,7 +202,8 @@ def main(argv=None):
                 p = os.path.join(cur, x)
                 if os.path.isdir(core.project_dir(p)):
                     targets.append(p)
-    results = [sync_one(t, args.dry_run, args.agents_md, args.refresh_agent_rules, args.profile,
+    results = [sync_one(t, args.dry_run, args.agents_md, args.refresh_agent_rules,
+                        args.migrate_structure, args.profile,
                         args.git_visibility, require_identity=args.registered,
                         register=not args.dry_run) for t in targets]
     ok = [r for r in results if r.get('ok')]
@@ -198,7 +211,8 @@ def main(argv=None):
                or r.get('git_visibility_updated')
                or (r.get('git_exclude') or {}).get('changed')
                or (r.get('agents_md') or {}).get('changed')
-               or (r.get('agent_rules') or {}).get('changed')]
+               or (r.get('agent_rules') or {}).get('changed')
+               or (r.get('migrate_structure') or {}).get('changed')]
 
     core.emit_json({
         'total': len(results),

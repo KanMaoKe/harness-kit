@@ -80,6 +80,61 @@ class HarnessRegressionTests(unittest.TestCase):
         self.assertIn('通用 Agent 工作方式与任务流程见 `TASKS.md`', project)
         self.assertNotIn('## ⑥ 开发铁律', project)
         self.assertNotIn('{{', text)
+        self.assertIn('<!-- harness-kit:authority-docs:start -->', text)
+
+    def test_doctor_detects_missing_authority_section_and_legacy_heading(self):
+        self.init()
+        tasks = self.project / '.harness/TASKS.md'
+        tasks.write_text('# Custom tasks\n\n## 开始任务\n\n1. 先读规则。\n', encoding='utf-8')
+        proj = self.project / '.harness/PROJECT.md'
+        text = proj.read_text(encoding='utf-8')
+        proj.write_text(text.replace('## ⑥ 项目规则', '## ⑥ 开发铁律'), encoding='utf-8')
+        report = json.loads(self.run_cli('kit/doctor.py', '--path', self.project, '--json'))
+        self.assertFalse(report['authority_docs_section'])
+        self.assertTrue(report['legacy_dev_rules_heading'])
+        self.assertTrue(any('权威文档' in w for w in report['warnings']))
+        self.assertTrue(any('开发铁律' in w for w in report['warnings']))
+
+    def test_migrate_structure_inserts_section_and_renames_heading(self):
+        self.init()
+        tasks = self.project / '.harness/TASKS.md'
+        custom = '# Custom tasks\n\n## 开始任务\n\n1. 先读规则。\n\n## 执行与交接\n\n- 保留这段。\n'
+        tasks.write_text(custom, encoding='utf-8')
+        proj = self.project / '.harness/PROJECT.md'
+        text = proj.read_text(encoding='utf-8')
+        proj.write_text(text.replace('## ⑥ 项目规则', '## ⑥ 开发铁律'), encoding='utf-8')
+        body_before = proj.read_text(encoding='utf-8')
+        preview = json.loads(self.run_cli(
+            'kit/sync.py', '--path', self.project, '--migrate-structure', '--dry-run'))
+        detail = preview['details'][0]['migrate_structure']
+        self.assertIn('insert_authority_docs', detail['actions'])
+        self.assertIn('rename_dev_rules_heading', detail['actions'])
+        self.assertEqual(tasks.read_text(encoding='utf-8'), custom)
+        self.assertEqual(proj.read_text(encoding='utf-8'), body_before)
+        self.run_cli('kit/sync.py', '--path', self.project, '--migrate-structure')
+        migrated = tasks.read_text(encoding='utf-8')
+        self.assertIn('<!-- harness-kit:authority-docs:start -->', migrated)
+        self.assertIn('保留这段。', migrated)
+        after = proj.read_text(encoding='utf-8')
+        self.assertIn('## 项目规则', after)
+        self.assertNotIn('## ⑥ 开发铁律', after)
+        report = json.loads(self.run_cli('kit/doctor.py', '--path', self.project, '--json'))
+        self.assertTrue(report['authority_docs_section'])
+        self.assertFalse(report['legacy_dev_rules_heading'])
+
+    def test_migrate_structure_is_idempotent(self):
+        self.init()
+        tasks = self.project / '.harness/TASKS.md'
+        tasks.write_text('# Custom tasks\n\n## 开始任务\n\n1. 先读规则。\n', encoding='utf-8')
+        self.run_cli('kit/sync.py', '--path', self.project, '--migrate-structure')
+        first = tasks.read_text(encoding='utf-8')
+        result = json.loads(self.run_cli(
+            'kit/sync.py', '--path', self.project, '--migrate-structure'))
+        detail = result['details'][0]['migrate_structure']
+        self.assertIn(detail['authority_docs']['action'],
+                      ('already_present', 'refresh_authority_docs'))
+        self.assertFalse(detail['changed'])
+        self.assertEqual(tasks.read_text(encoding='utf-8'), first)
 
     def test_refresh_agent_rules_updates_only_managed_block(self):
         self.init()

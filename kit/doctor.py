@@ -88,6 +88,44 @@ def check(path):
             if n >= 8:
                 result['warnings'].append('待补栏目较多，这份宪法目前对 AI 的约束力有限')
 
+    # 2b) 结构契约检查
+    tasks_file = os.path.join(wb, 'TASKS.md')
+    if os.path.isfile(tasks_file):
+        with open(tasks_file, encoding='utf-8', errors='ignore') as stream:
+            tasks_text = stream.read()
+        has_authority_section = bool(re.search(r'^##\s+权威文档\s*$', tasks_text, re.M))
+        has_authority_marker = core.AUTHORITY_DOCS_START in tasks_text
+        result['authority_docs_section'] = has_authority_section
+        result['authority_docs_managed'] = has_authority_marker
+        if not has_authority_section:
+            result['warnings'].append(
+                'TASKS.md 缺少顶层「权威文档」章节；可运行 sync --migrate-structure 补齐')
+        elif not has_authority_marker:
+            result['notes'].append('TASKS.md 有权威文档章节但无受管标记；'
+                                   'sync --migrate-structure 可为其添加受管标记')
+        size = os.path.getsize(tasks_file)
+        limit = cfg.get('tasks_max_bytes', 8192)
+        result['tasks_bytes'] = size
+        if size > limit:
+            result['notes'].append(
+                'TASKS.md 有 %d 字节，超过建议上限 %d；考虑把通用长文移到权威文档' % (size, limit))
+
+    if os.path.isfile(proj):
+        with open(proj, encoding='utf-8', errors='ignore') as stream:
+            proj_text = stream.read()
+        legacy_heading = re.search(r'^##\s+[^\n]*开发铁律[^\n]*$', proj_text, re.M)
+        result['legacy_dev_rules_heading'] = bool(legacy_heading)
+        if legacy_heading:
+            line_no = proj_text[:legacy_heading.start()].count('\n') + 1
+            result['warnings'].append(
+                'PROJECT.md 仍有旧「开发铁律」标题（第 %d 行）；可运行 sync --migrate-structure 改为「项目规则」' % line_no)
+        size = os.path.getsize(proj)
+        limit = cfg.get('project_max_bytes', 16384)
+        result['project_bytes'] = size
+        if size > limit:
+            result['notes'].append(
+                'PROJECT.md 有 %d 字节，超过建议上限 %d；考虑把详细内容移到权威文档' % (size, limit))
+
     # 3) 记忆腐化
     mem = os.path.join(wb, 'memory')
     if os.path.isdir(mem):
@@ -155,6 +193,12 @@ def check(path):
             core.agents_plan(path)
         except core.DataError as error:
             result['issues'].append(str(error))
+        agents_size = os.path.getsize(agents)
+        agents_limit = cfg.get('agents_max_bytes', 32768)
+        result['agents_bytes'] = agents_size
+        if agents_size > agents_limit:
+            result['warnings'].append(
+                'AGENTS.md 有 %d 字节，超过 %d 上限，Codex 默认会截断' % (agents_size, agents_limit))
     else:
         result['notes'].append('未发现根 AGENTS.md；需要项目入口时使用 --agents-md')
     return result
