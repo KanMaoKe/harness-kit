@@ -269,6 +269,7 @@ class HarnessRegressionTests(unittest.TestCase):
         first = agents.read_bytes()
         self.assertTrue(first.startswith(original.encode('utf-8')))
         self.assertIn(b'.harness/STATE.json', first)
+        self.assertIn('尚未初始化', first.decode('utf-8'))
         self.init('--agents-md')
         self.assertEqual(agents.read_bytes(), first)
         self.assertEqual(first.count(b'<!-- harness-kit:start -->'), 1)

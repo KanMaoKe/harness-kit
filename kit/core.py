@@ -611,13 +611,15 @@ def apply_agent_rules(plan):
 
 def agents_content(path, existing=''):
     folder = os.path.basename(project_dir(path))
-    block = ('%s\n## Harness 项目协作\n\n'
-             '- 先读取 `%s/PROJECT.md` 和 `%s/TASKS.md`，遵守已有项目指令。\n'
-             '- 从 `%s/STATE.json` 恢复当前目标、下一步、阻塞与验收状态。\n'
-             '- 只按任务需要读取相关文档和技能；可选记忆目录不要求存在。\n'
-             '- 开始、完成重要步骤、验证、阻塞或交接时，用 checkpoint 保存当前任务；不要只凭记忆继续。\n'
-             '- 阶段结束时更新 STATE.json 中的验证结果和下一步；未验证不标记完成。\n'
-             '%s\n' % (AGENTS_START, folder, folder, folder, AGENTS_END))
+    body = ('## Harness 项目协作\n\n'
+            '- 若 `%s/` 不存在，说明本机尚未初始化：先预览再运行 `kit/init_harness.py --path .`；不要假设仓库里应有该目录。\n'
+            '- 先读取 `%s/PROJECT.md` 和 `%s/TASKS.md`，遵守已有项目指令。\n'
+            '- 从 `%s/STATE.json` 恢复当前目标、下一步、阻塞与验收状态。\n'
+            '- 只按任务需要读取相关文档和技能；可选记忆目录不要求存在。\n'
+            '- 开始、完成重要步骤、验证、阻塞或交接时，用 checkpoint 保存当前任务；不要只凭记忆继续。\n'
+            '- 阶段结束时更新 STATE.json 中的验证结果和下一步；未验证不标记完成。\n'
+            % (folder, folder, folder, folder))
+    block = '%s\n%s%s\n' % (AGENTS_START, body, AGENTS_END)
     if AGENTS_START not in existing and AGENTS_END not in existing:
         return existing + ('\n\n' if existing and not existing.endswith('\n\n') else '') + block
     if existing.count(AGENTS_START) != 1 or existing.count(AGENTS_END) != 1:
