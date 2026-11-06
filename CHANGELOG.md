@@ -2,6 +2,8 @@
 
 ## 未发布
 
+- 提炼 Ponytail 的最小完整实现与复用顺序到 Agent 工作准则：覆盖真实影响范围，优先复用项目、平台和已有依赖，不牺牲必要验证与安全边界。
+- 工具版本升级为 3.0。
 - 新增 `sync --migrate-structure`：在旧 `TASKS.md` 插入受管的「权威文档」区块，把 `PROJECT.md` 的「开发铁律」标题改为「项目规则」，不删除正文。
 - `doctor` 检查权威文档章节、旧标题、受管标记和体积超限（TASKS 8 KB / PROJECT 16 KB / AGENTS 32 KB）。
 - 明确权威文档路径清单属于项目可共享内容，放 `AGENTS.md` 或 `docs/README.md`，`TASKS.md` 只记录入口。

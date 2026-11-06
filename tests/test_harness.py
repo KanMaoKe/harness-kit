@@ -72,6 +72,8 @@ class HarnessRegressionTests(unittest.TestCase):
         self.assertIn('先澄清，再执行', text)
         self.assertIn('只询问材料无法回答且会改变实现的问题', text)
         self.assertIn('只解决当前问题', text)
+        self.assertIn('最小完整实现', text)
+        self.assertIn('项目已有实现 → 标准库或平台能力 → 已安装依赖 → 必要的新代码', text)
         self.assertIn('按可验证目标执行', text)
         self.assertIn('定位根因', text)
         self.assertIn('本次实际运行的检查', text)
