@@ -26,6 +26,15 @@ python "{{KIT_PATH}}/kit/init_harness.py" --path "<项目>"
 
 如用户要求接入标准项目入口，初始化或同步时添加 `--agents-md`，只维护根目录 `AGENTS.md` 中标记的片段。
 
+旧项目升级前先预览，再分别执行：
+
+```bash
+python "{{KIT_PATH}}/kit/sync.py" --path "<项目>" --migrate-structure --dry-run
+python "{{KIT_PATH}}/kit/sync.py" --path "<项目>" --refresh-agent-rules --dry-run
+```
+
+确认预览后去掉 `--dry-run` 执行。`--migrate-structure` 只插入受管的「权威文档」区块、把「开发铁律」标题改为「项目规则」，不删除正文；`--refresh-agent-rules` 只更新 `TASKS.md` 受管的 Agent 工作准则。旧 `TASKS.md` 无标记时显式刷新只在末尾追加区块。标记损坏时停止并报告，不猜测修复。
+
 `.harness/` 默认属于本机协作上下文。目标位于 Git 工作副本时，初始化会把相应目录规则写入 `.git/info/exclude`，不修改根 `.gitignore`，也不自动暂存或提交。用户明确要求团队共享时才使用 `--share-harness`。初始化后结合项目补全 `PROJECT.md`，不要将整个记忆目录一次性注入上下文。
 
 项目已有设计、ADR、Issue、技术债或 Feature 文档时，沿用原体系，并在 `TASKS.md` 的「权威文档」中填写实际路径。不要在 harness 中再生成一份同名记录。只有项目缺少合适载体时，才创建普通文档并保持单一事实来源。
